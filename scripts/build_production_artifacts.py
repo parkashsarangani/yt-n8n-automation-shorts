@@ -83,7 +83,7 @@ def assert_growth_compose(text: str) -> None:
         'app.post("/topic-dedup"',
         "getMeasurementPlan",
         "allowFallbackOutro",
-        "lastSceneIsOutro",
+        "lastIsOutro = Boolean",
         "duration_sec: Number(totalVideoDuration.toFixed(3))",
         "strategy_arm",
         "canonical_key",
