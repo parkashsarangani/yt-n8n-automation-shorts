@@ -74,6 +74,22 @@ app.post("/topic-dedup", async (req, res) => {
         "measurement plan endpoint",
     )
 
+    # Preserve the commissioning prediction and semantic identity with the full
+    # candidate backlog. This makes predicted score -> measured cohort outcome
+    # calibration possible without reverse-engineering later from topic text.
+    text = replace_once(
+        text,
+        "    const { candidates, picked, picked_score } = req.body || {};",
+        "    const { candidates, picked, picked_score, strategy_arm, canonical_key, policy_version } = req.body || {};",
+        "topic backlog metadata",
+    )
+    text = replace_once(
+        text,
+        "      picked_score: picked_score != null ? picked_score : null,\n      candidates: Array.isArray(candidates) ? candidates : [],",
+        "      picked_score: picked_score != null ? picked_score : null,\n      strategy_arm: strategy_arm || null,\n      canonical_key: canonical_key || null,\n      policy_version: policy_version || 'shorts-growth-v2',\n      candidates: Array.isArray(candidates) ? candidates : [],",
+        "topic backlog rich entry",
+    )
+
     # A/B test must be real: no-outro renders truly end on the payoff instead of
     # the compositor silently adding its legacy 2.5s card back in.
     text = replace_once(
@@ -113,6 +129,8 @@ def main() -> None:
         "TOPIC_HISTORY_MAX = Math.max(500",
         'app.post("/topic-dedup"',
         "getMeasurementPlan",
+        "strategy_arm",
+        "canonical_key",
         "allowFallbackOutro",
         "lastSceneIsOutro",
         "duration_sec: Number(totalVideoDuration.toFixed(3))",
