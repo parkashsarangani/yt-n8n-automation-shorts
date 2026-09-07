@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply Shorts growth/analytics V2 runtime policy to generated compose.js."""
+"""Apply Shorts growth/analytics V2 runtime policy to generated V5 compose.js."""
 from __future__ import annotations
 import sys
 from pathlib import Path
@@ -74,9 +74,6 @@ app.post("/topic-dedup", async (req, res) => {
         "measurement plan endpoint",
     )
 
-    # Preserve the commissioning prediction and semantic identity with the full
-    # candidate backlog. This makes predicted score -> measured cohort outcome
-    # calibration possible without reverse-engineering later from topic text.
     text = replace_once(
         text,
         "    const { candidates, picked, picked_score } = req.body || {};",
@@ -90,29 +87,25 @@ app.post("/topic-dedup", async (req, res) => {
         "topic backlog rich entry",
     )
 
-    # A/B test must be real: no-outro renders truly end on the payoff instead of
-    # the compositor silently adding its legacy 2.5s card back in.
+    # The V5 creative-system transform already owns optional-outro mechanics,
+    # payoff emphasis, and content-duration calculation. Growth V2 adds only the
+    # experiment gate to that generated shape so the mature renderer logic is
+    # not duplicated or replaced.
     text = replace_once(
         text,
-        "    const hasScriptOutro = scenes.some((s) => s?.template_data?.is_outro);\n    if (!hasScriptOutro) {",
-        "    const hasScriptOutro = scenes.some((s) => s?.template_data?.is_outro);\n    const allowFallbackOutro = reqBody.outro_experiment_arm !== 'no_outro';\n    if (!hasScriptOutro && allowFallbackOutro) {",
-        "outro experiment fallback",
+        "    const wantsShareOutro = ['share_only', 'comment_and_share'].includes(engagement_mode);\n    // No mandatory end-card.",
+        "    const wantsShareOutro = ['share_only', 'comment_and_share'].includes(engagement_mode);\n    const allowFallbackOutro = reqBody.outro_experiment_arm !== 'no_outro';\n    // No mandatory end-card.",
+        "outro experiment gate",
     )
     text = replace_once(
         text,
-        "    const emphasisIdx = scenes.length - 2;",
-        "    let emphasisIdx = scenes.length - 1;\n    while (emphasisIdx > 0 && scenes[emphasisIdx]?.template_data?.is_outro) emphasisIdx--;",
-        "payoff emphasis without outro",
-    )
-    text = replace_once(
-        text,
-        "    const outroDuration = durations.length > 1 ? durations[durations.length - 1] : 0;\n    const contentDuration = totalVideoDuration - outroDuration;",
-        "    const lastSceneIsOutro = Boolean(scenes[scenes.length - 1]?.template_data?.is_outro);\n    const outroDuration = lastSceneIsOutro && durations.length ? durations[durations.length - 1] : 0;\n    const contentDuration = totalVideoDuration - outroDuration;",
-        "content duration without forced outro",
+        "    if (!hasScriptOutro && requestedOutro && wantsShareOutro) {",
+        "    if (!hasScriptOutro && allowFallbackOutro && requestedOutro && wantsShareOutro) {",
+        "outro experiment condition",
     )
 
     final_return = "    return { success: true, output_path: outputFullPath, job_id: jobId, final_visual_qa: finalVisualQa };"
-    final_return_v2 = "    return { success: true, output_path: outputFullPath, job_id: jobId, final_visual_qa: finalVisualQa, duration_sec: Number(totalVideoDuration.toFixed(3)), content_duration_sec: Number(contentDuration.toFixed(3)), outro_experiment_arm: reqBody.outro_experiment_arm || (hasScriptOutro ? 'current_outro' : 'legacy_fallback'), policy_version: reqBody.policy_version || 'shorts-growth-v2' };"
+    final_return_v2 = "    return { success: true, output_path: outputFullPath, job_id: jobId, final_visual_qa: finalVisualQa, duration_sec: Number(totalVideoDuration.toFixed(3)), content_duration_sec: Number(contentDuration.toFixed(3)), outro_experiment_arm: reqBody.outro_experiment_arm || (Boolean(scenes[scenes.length - 1]?.template_data?.is_outro) ? 'current_outro' : 'legacy_no_outro'), policy_version: reqBody.policy_version || 'shorts-growth-v2' };"
     text = replace_once(text, final_return, final_return_v2, "compose result growth telemetry")
 
     text += f"\n// {MARKER} policy={POLICY_VERSION}\n"
@@ -132,7 +125,7 @@ def main() -> None:
         "strategy_arm",
         "canonical_key",
         "allowFallbackOutro",
-        "lastSceneIsOutro",
+        "lastIsOutro = Boolean",
         "duration_sec: Number(totalVideoDuration.toFixed(3))",
     ]
     for marker in required:
