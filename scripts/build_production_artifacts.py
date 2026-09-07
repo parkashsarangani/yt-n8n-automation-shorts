@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Authoritative V6 production artifact builder.
+"""Authoritative V5 production artifact builder with Shorts growth policy.
 
-V6 deliberately layers the Shorts-growth policy on top of the retained V5
-builder. V5 remains the owner of visual matching, resolver hardening, final
-render QA, attribution, BT.709 normalization and LLM routing. V6 then applies
-only the measured-growth changes (analytics cohorts, topic policy/dedup,
-duration/outro experiment and policy telemetry), validates them, and rewrites
-the manifest. This keeps the B-roll architecture untouched by the growth pass.
+The retained V5 builder remains the owner of visual matching, resolver
+hardening, final-render QA, attribution, BT.709 normalization and LLM routing.
+This wrapper then applies only the measured-growth changes (analytics cohorts,
+topic policy/dedup, duration/outro experiment and policy telemetry), validates
+them, and rewrites the manifest. Keeping production_build_version=5 is
+intentional: the render/resolver artifact contract is unchanged; the independent
+`shorts_growth_policy` version tracks the creative/analytics experiment layer.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from pathlib import Path
 
 import build_production_artifacts_v5 as v5
 
-BUILD_VERSION = "6"
+BUILD_VERSION = "5"
 POLICY_VERSION = "shorts-growth-v2"
 INTERNAL_SERVICE_ORIGIN = v5.INTERNAL_SERVICE_ORIGIN
 PUBLIC_SERVICE_ORIGIN = v5.PUBLIC_SERVICE_ORIGIN
@@ -113,9 +114,9 @@ def build(root: Path, output: Path) -> dict:
     run("scripts/upgrade-shorts-growth-v2.py", str(workflow_out), str(workflow_out), cwd=root)
     run("scripts/upgrade-compose-growth-v2.py", str(compose_out), str(compose_out), cwd=root)
 
-    # The V5 postprocessor internalized service calls before V6 existed. V6 adds
-    # /topic-dedup afterward, so internalize once more to preserve the production
-    # Docker-network transport invariant.
+    # The V5 postprocessor internalized service calls before this policy existed.
+    # Growth adds /topic-dedup afterward, so internalize once more to preserve
+    # the production Docker-network transport invariant.
     workflow = json.loads(workflow_out.read_text())
     v5.internalize_compose_service_urls(workflow)
     workflow.setdefault("meta", {})["production_build_version"] = BUILD_VERSION
@@ -125,9 +126,9 @@ def build(root: Path, output: Path) -> dict:
     assert_growth_workflow(workflow)
     assert_growth_compose(compose_out.read_text())
 
-    # Recheck the inherited V5 invariants that this wrapper promises not to
-    # disturb. These checks make recommendation #12 concrete: growth work does
-    # not rewrite the B-roll/resolver subsystem.
+    # Recheck inherited V5 invariants. Recommendation #12 is therefore enforced
+    # structurally: this growth pass cannot quietly replace the B-roll/resolver
+    # subsystem that was already validated by the retained builder.
     resolver_text = resolver_out.read_text()
     for marker in ("RESOLVER_V5_RUNTIME", "V5_ALWAYS_PUBLISH_BEST_AVAILABLE", "best_available_below_quality_target"):
         if marker not in resolver_text:
