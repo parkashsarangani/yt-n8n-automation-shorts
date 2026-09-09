@@ -195,6 +195,26 @@ if(!_validCreativeFormats.includes(parsed.creative_format)){
 }
 const _validCaptionModes=['karaoke','key_phrases','minimal'];
 if(!_validCaptionModes.includes(parsed.caption_mode))parsed.caption_mode='karaoke';
+// VISUAL_PLAN_QUALITY_BACKSTOP: visual_plan_quality is another
+// Visual-Director-only field, but unlike the two above it gates publication.
+// When the model simply omits it the run used to die after exhausting every
+// repair attempt, so derive a score from what the plan demonstrably contains
+// instead. An honestly self-reported low score is left alone, and a genuinely
+// thin plan still fails both this floor and the per-scene field checks.
+if(!Number.isFinite(Number(parsed.visual_plan_quality))){
+  const _vpScenes=(Array.isArray(parsed.scenes)?parsed.scenes:[]).filter((s)=>s&&!(s.template_data&&s.template_data.is_outro));
+  const _vpComplete=_vpScenes.filter((s)=>{
+    if(s.visual_source==='template')return Boolean(s.template_name&&s.template_data);
+    return Boolean(String(s.stock_search_query||'').trim())&&Array.isArray(s.search_queries)&&s.search_queries.length>=3&&Boolean(s.visual_mode)&&Boolean(String(s.must_show||'').trim());
+  }).length;
+  const _vpRoles=new Set(_vpScenes.map((s)=>String(s.visual_role||'')).filter(Boolean));
+  const _vpRatio=_vpScenes.length?_vpComplete/_vpScenes.length:0;
+  let _vpScore=Math.round(50+40*_vpRatio);
+  if(parsed.first_frame_type)_vpScore+=3;
+  if(_vpRoles.size>=Math.min(3,_vpScenes.length))_vpScore+=3;
+  parsed.visual_plan_quality=Math.max(0,Math.min(96,_vpScore));
+  parsed.visual_plan_quality_derived=true;
+}
 // HOOK_CANDIDATES_BACKSTOP: this field is optional (the validator only checks
 // its shape when present), so a model that garbles it just needs the garbage
 // removed, not repaired - drop anything that isn't a clean 3-6 string array.
