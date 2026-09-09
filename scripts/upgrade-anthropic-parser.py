@@ -100,7 +100,19 @@ def patch_final_parser(workflow: dict) -> None:
     new_parse = last_valid_json_js() + "\nconst parsed = parseLastValidJsonObject(raw);"
     code = replace_required(code, old_parse, new_parse, "final last-valid JSON recovery")
     old_invalid = "if (!parsed) {\n  throw new Error('OpenAI editor did not return valid JSON: ' + raw.slice(0, 300));\n}"
-    new_invalid = "if (!parsed || typeof parsed.hook !== 'string' || !Array.isArray(parsed.scenes)) {\n  throw new Error('OpenAI visual-director response did not return a complete script JSON object (finish_reason: ' + (choice && choice.finish_reason || 'unknown') + ')');\n}"
+    # VISUAL_DIRECTOR_SOFT_FAIL: an unusable Visual Director response used to
+    # throw, which killed the entire scheduled run before the script
+    # retry/repair loop could ever engage (only a returned _scriptValid:false
+    # reaches it - a thrown error is fatal). Hand the upstream draft to the
+    # existing repair path instead so a single bad LLM response costs one
+    # attempt, not the day's upload.
+    new_invalid = (
+        "if (!parsed || typeof parsed.hook !== 'string' || !Array.isArray(parsed.scenes)) {\n"
+        "  let _vdDraft;\n"
+        "  try { _vdDraft = $('Parse Draft JSON').item.json.draft; } catch (e) { _vdDraft = undefined; }\n"
+        "  return { json: { _scriptValid: false, _validationErrors: ['visual director returned an incomplete script JSON object (finish_reason: ' + (choice && choice.finish_reason || 'unknown') + ') - rebuild the complete script, including every visual field, from the draft'], _failedScript: _vdDraft || parsed || {} } };\n"
+        "}"
+    )
     node["parameters"]["jsCode"] = replace_required(code, old_invalid, new_invalid, "final complete-script guard")
 
 
