@@ -1,3 +1,4 @@
+const { builtArtifactSkipReason } = require("./helpers/environment");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
@@ -53,7 +54,11 @@ test("wrong required entity remains visible in severe semantic telemetry", () =>
   assert.ok(result.hard.some((x) => /scene contract/i.test(x.problem)));
 });
 
-test("final visual QA can never block an otherwise successful compose", () => {
+// The non-blocking QA policy is injected by scripts/visual_matching_v4_compose.py,
+// so it only exists in the built artifact CI tests against.
+test("final visual QA can never block an otherwise successful compose", {
+  skip: builtArtifactSkipReason("compose.js", "VISUAL_MATCHING_V4_COMPOSE"),
+}, () => {
   const source = fs.readFileSync(path.join(__dirname, "..", "compose.js"), "utf8");
   assert.match(source, /NON_BLOCKING_FINAL_QA/);
   assert.match(source, /publishing anyway/);
