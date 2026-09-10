@@ -283,9 +283,23 @@ test('analytics ingest refuses a payload with no video dimension', async () => {
 });
 
 test('analytics ingest still accepts a genuine empty measurement window', async () => {
-  const result = await feedback.ingestAnalytics({
+  // This one reaches the write path, so it needs a writable data dir - the
+  // default resolves under /app, which is not writable in CI.
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-empty-'));
+  const prior = process.env.TOPIC_HISTORY_PATH;
+  process.env.TOPIC_HISTORY_PATH = path.join(dir, 'topic_history.json');
+  delete require.cache[require.resolve('../feedbackLoop')];
+  const fb = require('../feedbackLoop');
+
+  const result = await fb.ingestAnalytics({
     columnHeaders: [{ name: 'video' }, { name: 'views' }],
     rows: [],
   });
   assert.equal(result.updated, 0, 'zero rows is legitimate; only an unmeasurable payload should throw');
+
+  if (prior === undefined) delete process.env.TOPIC_HISTORY_PATH; else process.env.TOPIC_HISTORY_PATH = prior;
+  delete require.cache[require.resolve('../feedbackLoop')];
 });
