@@ -133,6 +133,28 @@ def add_deep_metric_pass(workflow: dict) -> None:
             "typeVersion": 2,
             "position": [7860, 1320],
         })
+    if "Build Deep Metrics Payload" not in names:
+        # $getWorkflowStaticData is a Code-node helper and is NOT available to
+        # HTTP-node expressions, where it evaluates to undefined and the body
+        # fails to parse. Build the payload in a Code node instead.
+        workflow["nodes"].append({
+            "parameters": {"jsCode": (
+                "// SHORTS_METRICS_V3: hand the accumulated per-video reports to the ingest call.\n"
+                "const staticData = $getWorkflowStaticData('global');\n"
+                "const runId = String($execution.id || '').trim();\n"
+                "if (!runId) throw new Error('Missing n8n execution id for workflow-scoped state');\n"
+                "staticData.deepMetrics = staticData.deepMetrics || {};\n"
+                "const videos = staticData.deepMetrics[runId] || [];\n"
+                "// Release this run's bucket so repeated passes cannot grow it.\n"
+                "delete staticData.deepMetrics[runId];\n"
+                "return { json: { measured_at: new Date().toISOString(), videos } };"
+            )},
+            "id": "a6c3f9d7-8b10-4eb6-af57-c1ef6d5c0066",
+            "name": "Build Deep Metrics Payload",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [7200, 1080],
+        })
     if "Ingest Deep Metrics" not in names:
         workflow["nodes"].append({
             "parameters": {
@@ -140,10 +162,7 @@ def add_deep_metric_pass(workflow: dict) -> None:
                 "url": "http://shorts-compose:4000/performance/ingest-deep",
                 "sendBody": True,
                 "specifyBody": "json",
-                "jsonBody": (
-                    "={{ JSON.stringify({ measured_at: new Date().toISOString(), "
-                    "videos: (($getWorkflowStaticData('global').deepMetrics || {})[String($execution.id)] || []) }) }}"
-                ),
+                "jsonBody": "={{ JSON.stringify($json) }}",
                 "options": {"timeout": 30000},
             },
             "id": "f5b2e8c6-7a99-4da5-9e46-b0de5c4b9955",
@@ -157,9 +176,10 @@ def add_deep_metric_pass(workflow: dict) -> None:
     conns["Ingest Analytics"] = {"main": [[{"node": "Split Videos For Deep Metrics", "type": "main", "index": 0}]]}
     # splitInBatches v3: output 0 is "done", output 1 is the per-item loop.
     conns["Split Videos For Deep Metrics"] = {"main": [
-        [{"node": "Ingest Deep Metrics", "type": "main", "index": 0}],
+        [{"node": "Build Deep Metrics Payload", "type": "main", "index": 0}],
         [{"node": "YouTube: Retention Curve", "type": "main", "index": 0}],
     ]}
+    conns["Build Deep Metrics Payload"] = {"main": [[{"node": "Ingest Deep Metrics", "type": "main", "index": 0}]]}
     conns["YouTube: Retention Curve"] = {"main": [[{"node": "YouTube: Traffic Sources", "type": "main", "index": 0}]]}
     conns["YouTube: Traffic Sources"] = {"main": [[{"node": "Collect Deep Metrics", "type": "main", "index": 0}]]}
     conns["Collect Deep Metrics"] = {"main": [[{"node": "Split Videos For Deep Metrics", "type": "main", "index": 0}]]}
@@ -190,6 +210,11 @@ def assert_applied(workflow: dict) -> None:
         raise RuntimeError("deep-metric loop branch is not wired to the retention report")
     if conns.get("Collect Deep Metrics", {}).get("main", [[]])[0][0]["node"] != "Split Videos For Deep Metrics":
         raise RuntimeError("deep-metric loop does not return to the batch splitter")
+    ingest_body = str(node_by_name(workflow, "Ingest Deep Metrics").get("parameters", {}).get("jsonBody", ""))
+    if "getWorkflowStaticData" in ingest_body:
+        raise RuntimeError("deep-metric ingest body uses a Code-node helper that HTTP expressions cannot resolve")
+    if loop[0][0]["node"] != "Build Deep Metrics Payload":
+        raise RuntimeError("deep-metric done branch must build its payload in a Code node first")
 
 
 def main() -> None:
