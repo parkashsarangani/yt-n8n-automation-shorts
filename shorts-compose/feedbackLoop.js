@@ -165,9 +165,97 @@ function parseAnalytics(body) {
       subscribers_per_engaged_view: safeRate(subscribersGained, satisfactionDenominator),
       impressions: m.videoThumbnailImpressions != null ? Math.round(m.videoThumbnailImpressions) : null,
       click_through_rate: pct(m.videoThumbnailImpressionsClickRate),
+      subscribers_lost: m.subscribersLost == null ? null : Math.round(m.subscribersLost),
+      net_subscribers: m.subscribersLost == null ? subscribersGained : subscribersGained - Math.round(m.subscribersLost),
+      dislikes: m.dislikes == null ? null : Math.round(m.dislikes),
+      minutes_watched: m.estimatedMinutesWatched == null ? null : Number(m.estimatedMinutesWatched),
+      // A Short that is genuinely liked returns a positive ratio; heavy dislikes
+      // suppress distribution far more than a low like count does.
+      like_ratio: m.dislikes == null ? null : safeRate(likes, likes + Math.round(m.dislikes)),
     };
   }
   return out;
+}
+
+// A Shorts view is won or lost in the first seconds, so the shape of the
+// retention curve is far more actionable than its average. Reduce YouTube's
+// per-ratio rows to the few numbers a strategist can act on: how many viewers
+// survive the hook, where the steepest drop happens, and how the whole curve
+// compares with similar videos (relativeRetentionPerformance is YouTube's own
+// benchmark and is the closest direct read on why distribution stalls).
+function summarizeRetention(body) {
+  const headers = ((body && body.columnHeaders) || []).map((h) => h.name);
+  const rows = (body && body.rows) || [];
+  const ri = headers.indexOf("elapsedVideoTimeRatio");
+  const wi = headers.indexOf("audienceWatchRatio");
+  const pi = headers.indexOf("relativeRetentionPerformance");
+  if (ri < 0 || wi < 0 || !rows.length) return null;
+
+  const points = rows
+    .map((r) => ({ at: Number(r[ri]), watch: Number(r[wi]), relative: pi >= 0 ? Number(r[pi]) : null }))
+    .filter((p) => Number.isFinite(p.at) && Number.isFinite(p.watch))
+    .sort((a, b) => a.at - b.at);
+  if (!points.length) return null;
+
+  const at = (ratio) => {
+    let best = points[0];
+    for (const p of points) if (Math.abs(p.at - ratio) < Math.abs(best.at - ratio)) best = p;
+    return best.watch;
+  };
+  let steepest = { from: null, to: null, drop: 0 };
+  for (let i = 1; i < points.length; i++) {
+    const drop = points[i - 1].watch - points[i].watch;
+    if (drop > steepest.drop) steepest = { from: points[i - 1].at, to: points[i].at, drop };
+  }
+  const relatives = points.map((p) => p.relative).filter((v) => Number.isFinite(v));
+
+  return {
+    points: points.length,
+    watch_ratio_at_start: points[0].watch,
+    watch_ratio_at_3pct: at(0.03),
+    watch_ratio_at_10pct: at(0.10),
+    watch_ratio_at_25pct: at(0.25),
+    watch_ratio_at_50pct: at(0.50),
+    watch_ratio_at_end: points[points.length - 1].watch,
+    // How much of the opening audience is still there a tenth of the way in -
+    // the practical hook-survival number for a 30s Short.
+    hook_survival: points[0].watch > 0 ? at(0.10) / points[0].watch : null,
+    steepest_drop_from_ratio: steepest.from,
+    steepest_drop_to_ratio: steepest.to,
+    steepest_drop: steepest.drop || null,
+    relative_retention_avg: relatives.length ? relatives.reduce((a, b) => a + b, 0) / relatives.length : null,
+  };
+}
+
+// Whether a Short is actually being served in the Shorts feed, or is only
+// reaching the few people who already follow the channel, changes what a weak
+// view count means - the same number is a content problem in one case and a
+// distribution problem in the other.
+function summarizeTrafficSources(body) {
+  const headers = ((body && body.columnHeaders) || []).map((h) => h.name);
+  const rows = (body && body.rows) || [];
+  const si = headers.indexOf("insightTrafficSourceType");
+  const vi = headers.indexOf("views");
+  if (si < 0 || vi < 0 || !rows.length) return null;
+
+  const bySource = {};
+  let total = 0;
+  for (const r of rows) {
+    const src = String(r[si] || "UNKNOWN");
+    const v = Number(r[vi]) || 0;
+    bySource[src] = (bySource[src] || 0) + v;
+    total += v;
+  }
+  const share = (key) => (total > 0 ? (bySource[key] || 0) / total : null);
+  return {
+    total_views: total,
+    by_source: bySource,
+    shorts_feed_share: share("SHORTS"),
+    browse_share: share("BROWSE_FEATURES"),
+    suggested_share: share("RELATED_VIDEO"),
+    search_share: share("YT_SEARCH"),
+    channel_share: share("YT_CHANNEL"),
+  };
 }
 
 function ageHours(publishedAt, measuredAt) {
@@ -239,8 +327,13 @@ MEASUREMENT MODEL - follow this order:
 1. HOOK / SCROLL-STOP is primary: engaged_view_rate = engaged_views / public views. It estimates how many starts survived the opening. Optimize the first frame, hook wording, topic promise and first seconds against this first.
 2. HOLD is second: average_view_percentage and average_view_duration_sec describe what happened after a viewer became engaged. A high hold metric cannot rescue a weak scroll-stop rate.
 3. SATISFACTION is third: compare shares_per_engaged_view, comments_per_engaged_view, likes_per_engaged_view and subscribers_per_engaged_view. Prefer rates over raw counts.
-4. views is a distribution/outcome metric, not the creative-quality objective by itself.
-5. Thumbnail impressions/CTR are secondary for Shorts-feed learning and should only be mentioned when non-null and materially informative.
+4. views is a distribution/outcome metric, not the creative-quality objective by itself. This channel is currently capped near ~1000 views per Short, which is the size of YouTube's initial test audience: passing that gate is decided by the satisfaction and retention signals above, not by anything that raises views directly. Treat a cluster of Shorts at roughly the same view count as censored data, not as a quality ranking.
+5. When metrics.retention is present, use it before any averaged number, because a Short is won or lost in its opening seconds:
+   - hook_survival is the fraction of the opening audience still watching a tenth of the way in. This is the sharpest available read on the hook.
+   - steepest_drop_from_ratio / steepest_drop_to_ratio locate exactly where viewers leave. Map that back to what happens at that point in the script (hook, mid-beat, payoff, outro) and make the recommendation about that specific beat.
+   - relative_retention_avg is YouTube's own comparison against similar videos; above 0.5 is better than typical, below 0.5 is worse. It is the closest direct read on why distribution stalls.
+6. When metrics.traffic is present, check shorts_feed_share before blaming the creative. A Short with a low shorts_feed_share was barely served to the feed at all, so its low view count is a distribution outcome and says little about the hook; one with a high shorts_feed_share and weak retention IS a creative problem.
+7. Thumbnail impressions/CTR are secondary for Shorts-feed learning and should only be mentioned when non-null and materially informative.
 
 DISCIPLINE:
 - Fewer than ~8 videos in this cohort: make only small claims. With zero, return no guidance.
@@ -361,6 +454,44 @@ async function ingestAnalytics(body) {
   return { updated, total: hist.length, captured, insights, measured_at: measuredAt };
 }
 
+// Per-video retention/traffic reports need their own API call each, so they
+// arrive after the batch metrics pass. Attach them to the cohort snapshot that
+// was just frozen so a curve is never compared against a different video age.
+async function ingestDeepMetrics(body) {
+  const entries = Array.isArray(body && body.videos) ? body.videos : [];
+  const hist = await readJson(PERF_PATH, []);
+  const byId = new Map(hist.map((h) => [h.video_id, h]));
+  const measuredAt = (body && body.measured_at) || new Date().toISOString();
+  let updated = 0;
+  const attached = {};
+
+  for (const entry of entries) {
+    const h = byId.get(entry && entry.video_id);
+    if (!h) continue;
+    const retention = summarizeRetention(entry.retention);
+    const traffic = summarizeTrafficSources(entry.traffic);
+    if (!retention && !traffic) continue;
+
+    const deep = { retention, traffic, measured_at: measuredAt };
+    h.latest_deep_metrics = deep;
+
+    // Prefer the newest cohort this video already has, so the curve lands on a
+    // like-for-like measurement instead of creating an unaged bucket.
+    const snapshots = h.snapshots && typeof h.snapshots === "object" ? h.snapshots : null;
+    const target = snapshots
+      ? [...SNAPSHOT_TARGETS].reverse().find((t) => snapshots[t.key])
+      : null;
+    if (target) {
+      snapshots[target.key].retention = retention;
+      snapshots[target.key].traffic = traffic;
+      attached[h.video_id] = target.key;
+    }
+    updated++;
+  }
+  await writeJson(PERF_PATH, hist);
+  return { updated, attached, measured_at: measuredAt };
+}
+
 async function getInsights() {
   return await readJson(INSIGHTS_PATH, {
     sample_size: 0,
@@ -399,6 +530,9 @@ module.exports = {
   SNAPSHOT_TARGETS,
   logPublished,
   ingestAnalytics,
+  ingestDeepMetrics,
+  summarizeRetention,
+  summarizeTrafficSources,
   getInsights,
   getMeasureIds,
   getMeasurementPlan,

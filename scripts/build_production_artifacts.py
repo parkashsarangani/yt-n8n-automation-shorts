@@ -114,6 +114,12 @@ def build(root: Path, output: Path) -> dict:
     run("scripts/upgrade-shorts-growth-v2.py", str(workflow_out), str(workflow_out), cwd=root)
     run("scripts/upgrade-compose-growth-v2.py", str(compose_out), str(compose_out), cwd=root)
 
+    # Gate-two measurement layers on top of growth policy because it attaches
+    # retention/traffic to the cohort snapshots growth-v2 introduces, keeping
+    # every curve pinned to a like-for-like video age.
+    run("scripts/upgrade-shorts-metrics-v3.py", str(workflow_out), str(workflow_out), cwd=root)
+    run("scripts/upgrade-compose-metrics-v3.py", str(compose_out), str(compose_out), cwd=root)
+
     # The V5 postprocessor internalized service calls before this policy existed.
     # Growth adds /topic-dedup afterward, so internalize once more to preserve
     # the production Docker-network transport invariant.

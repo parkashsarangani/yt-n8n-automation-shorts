@@ -186,3 +186,81 @@ test('refuses to publish a topic it could not semantically check', async () => {
   process.env.TOPIC_DEDUP_REQUIRE_SEMANTIC = prior;
   delete require.cache[require.resolve('../topicPolicy')];
 });
+
+test('retention summary locates hook survival and the steepest drop', () => {
+  // Shape of a real Shorts curve: heavy loss in the opening, then a plateau.
+  const body = {
+    columnHeaders: [
+      { name: 'elapsedVideoTimeRatio' }, { name: 'audienceWatchRatio' }, { name: 'relativeRetentionPerformance' },
+    ],
+    rows: [
+      [0.00, 1.00, 0.60], [0.03, 0.82, 0.58], [0.10, 0.55, 0.44],
+      [0.25, 0.50, 0.42], [0.50, 0.46, 0.41], [1.00, 0.30, 0.35],
+    ],
+  };
+  const r = feedback.summarizeRetention(body);
+  assert.equal(r.watch_ratio_at_start, 1);
+  assert.equal(r.watch_ratio_at_10pct, 0.55);
+  assert.equal(r.hook_survival, 0.55);
+  // Biggest single drop is 0.82 -> 0.55, between 3% and 10% of the video.
+  assert.equal(r.steepest_drop_from_ratio, 0.03);
+  assert.equal(r.steepest_drop_to_ratio, 0.10);
+  assert.ok(r.relative_retention_avg > 0.4 && r.relative_retention_avg < 0.5);
+});
+
+test('retention summary tolerates a Short with no curve yet', () => {
+  assert.equal(feedback.summarizeRetention(null), null);
+  assert.equal(feedback.summarizeRetention({ columnHeaders: [], rows: [] }), null);
+});
+
+test('traffic summary separates a distribution problem from a creative one', () => {
+  const body = {
+    columnHeaders: [{ name: 'insightTrafficSourceType' }, { name: 'views' }, { name: 'estimatedMinutesWatched' }],
+    rows: [['SHORTS', 900, 60], ['YT_CHANNEL', 80, 5], ['YT_SEARCH', 20, 2]],
+  };
+  const t = feedback.summarizeTrafficSources(body);
+  assert.equal(t.total_views, 1000);
+  assert.equal(t.shorts_feed_share, 0.9);
+  assert.equal(t.channel_share, 0.08);
+});
+
+test('deep metrics attach to the newest frozen cohort, never a new bucket', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deepmetrics-'));
+  // PERF_PATH is derived from TOPIC_HISTORY_PATH's directory.
+  const prior = process.env.TOPIC_HISTORY_PATH;
+  process.env.TOPIC_HISTORY_PATH = path.join(dir, 'topic_history.json');
+  delete require.cache[require.resolve('../feedbackLoop')];
+  const fb = require('../feedbackLoop');
+  const perfPath = path.join(dir, 'performance_history.json');
+
+  fs.writeFileSync(perfPath, JSON.stringify([
+    { video_id: 'vid1', published_at: '2026-09-01T00:00:00Z', snapshots: { t6h: { views: 10 }, t24h: { views: 40 } } },
+  ]));
+
+  const result = await fb.ingestDeepMetrics({
+    measured_at: '2026-09-02T02:00:00Z',
+    videos: [{
+      video_id: 'vid1',
+      retention: {
+        columnHeaders: [{ name: 'elapsedVideoTimeRatio' }, { name: 'audienceWatchRatio' }],
+        rows: [[0, 1], [0.1, 0.5], [1, 0.2]],
+      },
+      traffic: {
+        columnHeaders: [{ name: 'insightTrafficSourceType' }, { name: 'views' }],
+        rows: [['SHORTS', 40]],
+      },
+    }],
+  });
+
+  assert.equal(result.updated, 1);
+  assert.equal(result.attached.vid1, 't24h', 'must attach to the newest frozen cohort');
+  const saved = JSON.parse(fs.readFileSync(perfPath, 'utf8'));
+  assert.ok(saved[0].snapshots.t24h.retention, 'retention lands on the t24h cohort');
+  assert.equal(saved[0].snapshots.t6h.retention, undefined, 't6h must stay frozen as measured');
+
+  if (prior === undefined) delete process.env.TOPIC_HISTORY_PATH; else process.env.TOPIC_HISTORY_PATH = prior;
+  delete require.cache[require.resolve('../feedbackLoop')];
+});
