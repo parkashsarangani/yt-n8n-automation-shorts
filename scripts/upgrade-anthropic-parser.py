@@ -106,11 +106,32 @@ def patch_final_parser(workflow: dict) -> None:
     # reaches it - a thrown error is fatal). Hand the upstream draft to the
     # existing repair path instead so a single bad LLM response costs one
     # attempt, not the day's upload.
+    # VISUAL_DIRECTOR_RECOVERY: the Visual Director is only supposed to ADD
+    # visual fields to the draft, but it repeatedly returns just those fields
+    # with no hook/scenes, and the repair pass uses the same prompt so it fails
+    # the same way - execution 809 burned all three attempts on it.
+    #
+    # The draft already holds the authoritative content, so overlay whatever the
+    # director did return instead of discarding the run. Narration, scene_index
+    # and point stay from the draft; visual fields come from the director.
     new_invalid = (
         "if (!parsed || typeof parsed.hook !== 'string' || !Array.isArray(parsed.scenes)) {\n"
         "  let _vdDraft;\n"
         "  try { _vdDraft = $('Parse Draft JSON').item.json.draft; } catch (e) { _vdDraft = undefined; }\n"
-        "  return { json: { _scriptValid: false, _validationErrors: ['visual director returned an incomplete script JSON object (finish_reason: ' + (choice && choice.finish_reason || 'unknown') + ') - rebuild the complete script, including every visual field, from the draft'], _failedScript: _vdDraft || parsed || {} } };\n"
+        "  const _vdPartial = (parsed && typeof parsed === 'object') ? parsed : {};\n"
+        "  if (_vdDraft && typeof _vdDraft.hook === 'string' && Array.isArray(_vdDraft.scenes)) {\n"
+        "    const _vdScenes = Array.isArray(_vdPartial.scenes) ? _vdPartial.scenes : [];\n"
+        "    parsed = Object.assign({}, _vdDraft, _vdPartial, {\n"
+        "      hook: (typeof _vdPartial.hook === 'string' && _vdPartial.hook) ? _vdPartial.hook : _vdDraft.hook,\n"
+        "      scenes: _vdDraft.scenes.map((s, i) => {\n"
+        "        const v = _vdScenes.find((x) => Number(x && x.scene_index) === Number(s.scene_index)) || _vdScenes[i] || {};\n"
+        "        return Object.assign({}, s, v, { scene_index: s.scene_index, point: s.point || v.point, narration: s.narration });\n"
+        "      }),\n"
+        "    });\n"
+        "    parsed.visual_director_recovered = true;\n"
+        "  } else {\n"
+        "    return { json: { _scriptValid: false, _validationErrors: ['visual director returned an incomplete script JSON object (finish_reason: ' + (choice && choice.finish_reason || 'unknown') + ') and no usable draft was available to rebuild from'], _failedScript: _vdDraft || _vdPartial } };\n"
+        "  }\n"
         "}"
     )
     node["parameters"]["jsCode"] = replace_required(code, old_invalid, new_invalid, "final complete-script guard")
