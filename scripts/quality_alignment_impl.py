@@ -109,7 +109,12 @@ def patch_visual_director(workflow: dict) -> None:
         "justified. Re-score honestly after the real rewrite; raising the "
         "reported number alone without a genuine content change is not a "
         "repair, it is the same script re-failing on the next gate that "
-        "reads it.\\n\\nEXCEPTION - CATEGORICAL TOPIC REJECTION: if any entry in FAILED CHECKS below "
+        "reads it.\\n\\nEXCEPTION - SCENE COUNT: the instruction above to preserve scene order and "
+        "count is overridden when a failed check below is about the number of scenes. The script must "
+        "end up with 3-8 content scenes, so merge or split beats as needed in that case, renumber "
+        "scene_index sequentially from 0, and update payoff.resolved_in_scene to match. Preserving a "
+        "scene count the gate has already rejected only fails the same check again."
+        "\\n\\nEXCEPTION - CATEGORICAL TOPIC REJECTION: if any entry in FAILED CHECKS below "
         "states that this content type is excluded (for example a medical/health-content exclusion), "
         "the topic itself is disqualified and cannot be repaired by rewording - ignore every instruction "
         "above about preserving the topic. Instead pick a DIFFERENT topic from CANDIDATE POOL below, "
@@ -195,6 +200,63 @@ if(!_validCreativeFormats.includes(parsed.creative_format)){
 }
 const _validCaptionModes=['karaoke','key_phrases','minimal'];
 if(!_validCaptionModes.includes(parsed.caption_mode))parsed.caption_mode='karaoke';
+// VISUAL_PLAN_QUALITY_BACKSTOP: visual_plan_quality is another
+// Visual-Director-only field, but unlike the two above it gates publication.
+// When the model simply omits it the run used to die after exhausting every
+// repair attempt, so derive a score from what the plan demonstrably contains
+// instead. An honestly self-reported low score is left alone, and a genuinely
+// thin plan still fails both this floor and the per-scene field checks.
+if(!Number.isFinite(Number(parsed.visual_plan_quality))){
+  const _vpScenes=(Array.isArray(parsed.scenes)?parsed.scenes:[]).filter((s)=>s&&!(s.template_data&&s.template_data.is_outro));
+  const _vpComplete=_vpScenes.filter((s)=>{
+    if(s.visual_source==='template')return Boolean(s.template_name&&s.template_data);
+    return Boolean(String(s.stock_search_query||'').trim())&&Array.isArray(s.search_queries)&&s.search_queries.length>=3&&Boolean(s.visual_mode)&&Boolean(String(s.must_show||'').trim());
+  }).length;
+  const _vpRoles=new Set(_vpScenes.map((s)=>String(s.visual_role||'')).filter(Boolean));
+  const _vpRatio=_vpScenes.length?_vpComplete/_vpScenes.length:0;
+  let _vpScore=Math.round(50+40*_vpRatio);
+  if(parsed.first_frame_type)_vpScore+=3;
+  if(_vpRoles.size>=Math.min(3,_vpScenes.length))_vpScore+=3;
+  parsed.visual_plan_quality=Math.max(0,Math.min(96,_vpScore));
+  parsed.visual_plan_quality_derived=true;
+}
+// SCENE_COUNT_BACKSTOP: the validator caps content at 8 scenes, but the repair
+// pass is told to preserve scene order/count, so an over-long script can never
+// be repaired and burns every attempt on a bound it is forbidden to change.
+// Merge the shortest adjacent content scenes until it fits - that keeps all
+// narration instead of discarding a beat - then renumber and repoint payoff.
+if(Array.isArray(parsed.scenes)){
+  const _scIsOutro=(s)=>Boolean(s&&s.template_data&&s.template_data.is_outro);
+  const _scOutro=parsed.scenes.filter(_scIsOutro);
+  const _scContent=parsed.scenes.filter((s)=>s&&!_scIsOutro(s));
+  if(_scContent.length>8){
+    const _scPayoffIdx=Number(parsed.payoff&&parsed.payoff.resolved_in_scene);
+    const _scWords=(s)=>String((s&&s.narration)||'').trim().split(/\s+/).filter(Boolean).length;
+    while(_scContent.length>8){
+      let _scAt=0,_scBest=Infinity;
+      for(let i=0;i<_scContent.length-1;i++){
+        const pair=_scWords(_scContent[i])+_scWords(_scContent[i+1]);
+        if(pair<_scBest){_scBest=pair;_scAt=i;}
+      }
+      const _scA=_scContent[_scAt],_scB=_scContent[_scAt+1];
+      const _scKeep=Number(_scB.scene_index)===_scPayoffIdx?_scB:_scA;
+      _scContent.splice(_scAt,2,Object.assign({},_scA,{
+        narration:[String(_scA.narration||'').trim(),String(_scB.narration||'').trim()].filter(Boolean).join(' '),
+        point:_scA.point||_scB.point,
+        scene_index:_scKeep.scene_index,
+      }));
+    }
+    const _scRemap={};
+    _scContent.forEach((s,i)=>{_scRemap[Number(s.scene_index)]=i;s.scene_index=i;});
+    parsed.scenes=_scContent.concat(_scOutro);
+    if(parsed.payoff&&typeof parsed.payoff==='object'){
+      const _scMapped=_scRemap[_scPayoffIdx];
+      parsed.payoff.resolved_in_scene=Number.isFinite(_scMapped)?_scMapped:_scContent.length-1;
+    }
+    parsed.full_script=_scContent.map((s)=>String(s.narration||'').trim()).filter(Boolean).join(' ');
+    parsed.scene_count_repaired=true;
+  }
+}
 // HOOK_CANDIDATES_BACKSTOP: this field is optional (the validator only checks
 // its shape when present), so a model that garbles it just needs the garbage
 // removed, not repaired - drop anything that isn't a clean 3-6 string array.

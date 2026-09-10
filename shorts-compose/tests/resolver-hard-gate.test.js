@@ -8,6 +8,8 @@ process.env.BROLL_ENTITY_THRESHOLD = "85";
 process.env.BROLL_ACTION_THRESHOLD = "80";
 process.env.BROLL_RELATIONSHIP_THRESHOLD = "80";
 
+const { builtArtifactSkipReason } = require("./helpers/environment");
+
 const { candidatePassesGate, normalizeTemplateFallback } = require("../brollResolver");
 const { buildVisualContract } = require("../visualContract");
 
@@ -36,7 +38,11 @@ test("deterministic template fallback accepts only known renderers with data", (
   assert.equal(normalizeTemplateFallback(null), null);
 });
 
-test("production resolver always selects best usable asset when quality target is missed", () => {
+// RESOLVER_V5_RUNTIME is injected by scripts/resolver_v5_runtime.py, so this
+// invariant only exists in the built artifact CI tests against.
+test("production resolver always selects best usable asset when quality target is missed", {
+  skip: builtArtifactSkipReason("brollResolver.js", "RESOLVER_V5_RUNTIME"),
+}, () => {
   const source = fs.readFileSync(path.join(__dirname, "..", "brollResolver.js"), "utf8");
   assert.match(source, /V5_ALWAYS_PUBLISH_BEST_AVAILABLE/);
   assert.match(source, /best_available_below_quality_target/);
