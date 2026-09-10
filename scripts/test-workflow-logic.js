@@ -294,9 +294,15 @@ function main() {
       check('  -> shortlist has 4 entries', r.json.shortlist.length === 4);
     }, '4 valid candidates -> succeeds');
 
+    // A short pool used to throw, which lost the whole scheduled run over one
+    // bad topic response. It now falls back to evergreen candidates, so the run
+    // continues and only topic novelty degrades.
     const tooFew = openaiResponse(JSON.stringify({ candidates: [mkCandidate(1)] }));
-    throws(() => runNodeCode(nodes, 'Parse Topic Pool', tooFew), 'only 1 candidate -> throws floor error',
-      (m) => m.includes('fewer than 3 usable candidates'));
+    doesNotThrow(() => {
+      const r = runNodeCode(nodes, 'Parse Topic Pool', tooFew);
+      check('  -> falls back to a usable pool', r.json.pool.length >= 3);
+      check('  -> shortlist is still populated', r.json.shortlist.length >= 1);
+    }, 'only 1 candidate -> falls back instead of failing the run');
 
     const truncated = openaiResponse('{"candidates":[' + JSON.stringify(mkCandidate(1)) + ',{"topic":"cut off mid', 'length');
     throws(() => runNodeCode(nodes, 'Parse Topic Pool', truncated), 'max_completion_tokens truncation -> clear diagnostic, not raw SyntaxError',
