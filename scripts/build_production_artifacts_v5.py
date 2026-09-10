@@ -28,8 +28,8 @@ REAL_MEDIA_MIX_GUARD = "V5_REAL_MEDIA_MIX_GUARD"
 # nothing for months without a single failed run. Substituting a real id here
 # makes the wiring explicit and checkable at build time.
 ANALYTICS_CRED_PLACEHOLDER = "REPLACE_WITH_ANALYTICS_OAUTH_CRED"
-ANALYTICS_CRED_ID = os.environ.get("N8N_ANALYTICS_CRED_ID", "").strip()
-ANALYTICS_CRED_NAME = os.environ.get("N8N_ANALYTICS_CRED_NAME", "YouTube Analytics OAuth2").strip()
+ANALYTICS_CRED_ID = os.environ.get("N8N_ANALYTICS_CRED_ID", "N95SdKRxZd6iVge7").strip()
+ANALYTICS_CRED_NAME = os.environ.get("N8N_ANALYTICS_CRED_NAME", "YouTube Analytics API").strip()
 
 
 def run(*args: str, cwd: Path) -> None:
