@@ -15,6 +15,13 @@ const path = require("path");
 const { execFileSync, spawn } = require("child_process");
 const http = require("http");
 
+const { renderToolchainSkipReason } = require("./helpers/environment");
+
+// These tests boot the compositor and render real MP4s. Without the render
+// toolchain they previously failed with "compose server exited early with 1",
+// which reads exactly like a regression. Skip with a reason instead.
+const RENDER_SKIP = renderToolchainSkipReason();
+
 const COMPOSE_PORT = 4111;
 const BASE_URL = `http://localhost:${COMPOSE_PORT}`;
 const TEST_TIMEOUT = 180_000;
@@ -139,6 +146,7 @@ function ratio(value) {
 }
 
 before(async () => {
+    if (RENDER_SKIP) return;
     await fsp.mkdir(path.join(__dirname, "_test_outputs"), { recursive: true });
     serverProcess = spawn("node", ["compose.js"], {
         cwd: path.join(__dirname, ".."),
@@ -171,6 +179,7 @@ before(async () => {
 });
 
 after(async () => {
+    if (RENDER_SKIP) return;
     if (serverProcess) {
         serverProcess.kill("SIGTERM");
         await new Promise((r) => setTimeout(r, 500));
@@ -178,7 +187,7 @@ after(async () => {
     await fsp.rm(path.join(__dirname, "_test_outputs"), { recursive: true, force: true });
 });
 
-describe("API endpoints", () => {
+describe("API endpoints", { skip: RENDER_SKIP }, () => {
     it("POST /compose returns 202 with job_id", async () => {
         const { status, body } = await postJSON("/compose", buildTestPayload());
         assert.strictEqual(status, 202);
@@ -205,7 +214,7 @@ describe("API endpoints", () => {
     });
 });
 
-describe("Video output quality", { timeout: TEST_TIMEOUT }, () => {
+describe("Video output quality", { timeout: TEST_TIMEOUT, skip: RENDER_SKIP }, () => {
     let outputPath;
     let probeData;
 
@@ -256,7 +265,7 @@ describe("Video output quality", { timeout: TEST_TIMEOUT }, () => {
     });
 });
 
-describe("Template scenes render correctly", { timeout: TEST_TIMEOUT }, () => {
+describe("Template scenes render correctly", { timeout: TEST_TIMEOUT, skip: RENDER_SKIP }, () => {
     const annotatedImage = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='600'%3E%3Crect width='800' height='600' fill='%23223344'/%3E%3Ccircle cx='400' cy='300' r='140' fill='%23eeeeee'/%3E%3C/svg%3E";
     for (const fixture of [
         { name: "stat_reveal", data: { statValue: "99.7%", label: "ACCURACY" }, mood: "serious" },
@@ -321,7 +330,7 @@ describe("Template scenes render correctly", { timeout: TEST_TIMEOUT }, () => {
     }
 });
 
-describe("Multi-scene composition", { timeout: TEST_TIMEOUT * 2 }, () => {
+describe("Multi-scene composition", { timeout: TEST_TIMEOUT * 2, skip: RENDER_SKIP }, () => {
     it("uses hard cuts and preserves all scene durations plus requested outro", async () => {
         const audioBase64 = generateAudioBase64(3);
         const alignment = alignmentFor("Test");
@@ -355,7 +364,7 @@ describe("Multi-scene composition", { timeout: TEST_TIMEOUT * 2 }, () => {
     });
 });
 
-describe("Error handling", () => {
+describe("Error handling", { skip: RENDER_SKIP }, () => {
     it("rejects empty scenes array", async () => {
         const { body } = await postJSON("/compose", { hook: "test", caption_style: "neutral", data: [] });
         if (body.job_id) {

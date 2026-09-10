@@ -5,6 +5,10 @@ const fsp = fs.promises;
 const os = require("os");
 const path = require("path");
 const { execFileSync } = require("child_process");
+const { hasSystemFfmpeg } = require("./helpers/environment");
+
+// This case synthesizes a real MP4 to rebuild a trim from, so it needs system FFmpeg.
+const FFMPEG_SKIP = hasSystemFfmpeg() ? false : "requires system FFmpeg on PATH (installed in CI)";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "broll-library-test-"));
 const libraryPath = path.join(tmp, "broll_library.json");
@@ -84,7 +88,7 @@ describe("persistent verified clip library", () => {
     assert.equal(rows[0].height, 800);
   });
 
-  it("rebuilds an expired verified trim from original source and stored in/out points", async () => {
+  it("rebuilds an expired verified trim from original source and stored in/out points", { skip: FFMPEG_SKIP }, async () => {
     const source = path.join(tmp, "source.mp4");
     execFileSync("ffmpeg", [
       "-hide_banner", "-loglevel", "error", "-y",
