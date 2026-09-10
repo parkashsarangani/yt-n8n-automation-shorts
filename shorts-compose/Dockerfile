@@ -35,6 +35,16 @@ WORKDIR /app
 COPY package*.json runtime-postinstall.js ./
 RUN npm install --production
 
+# Bake the topic-dedup embedding model into the image. Fetched lazily it would
+# download from the HF Hub on first use, so a DNS/network blip would silently
+# drop the 500-Short no-repeat guarantee to the lexical gate at exactly the
+# moment a scheduled run depends on it.
+ENV HF_HOME=/app/.hf-cache TRANSFORMERS_CACHE=/app/.hf-cache
+RUN node -e "import('@huggingface/transformers').then(async (m) => { \
+      await m.pipeline('feature-extraction', process.env.TOPIC_DEDUP_EMBEDDING_MODEL || 'Xenova/all-MiniLM-L6-v2'); \
+      console.log('[build] topic-dedup embedding model cached'); \
+    }).catch((e) => { console.error('[build] embedding prefetch failed:', e && e.message); process.exit(1); })"
+
 # Install Remotion project dependencies.
 # Remotion's bundler pulls @rspack/core, whose platform-native binding
 # (@rspack/binding-linux-x64-gnu) is an OPTIONAL dependency that npm's

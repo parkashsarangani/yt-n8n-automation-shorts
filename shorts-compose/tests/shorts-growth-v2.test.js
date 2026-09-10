@@ -5,6 +5,11 @@ const assert = require('node:assert/strict');
 // model is available; these tests exercise the deterministic canonical/lexical
 // safeguards and the cosine-threshold primitive directly.
 process.env.TOPIC_DEDUP_DISABLE_EMBEDDINGS = 'true';
+// Production fails closed when a candidate cannot be semantically checked -
+// that is what actually protects the 500-Short horizon. These tests exercise
+// the offline fallback in isolation, so they opt out of that gate; the
+// fail-closed default itself is asserted separately below.
+process.env.TOPIC_DEDUP_REQUIRE_SEMANTIC = 'false';
 process.env.TOPIC_HISTORY_MAX = '500';
 
 const topicPolicy = require('../topicPolicy');
@@ -149,4 +154,35 @@ test('creative DNA carries policy, duration target and outro experiment arm', ()
   assert.equal(dna.duration_sec, 33.4);
   assert.equal(dna.target_duration_band, '28-36s');
   assert.equal(dna.outro_experiment_arm, 'no_outro');
+});
+
+test('stemmed lexical fallback catches a barely-reworded duplicate offline', async () => {
+  const history = [{ topic: 'Your soda tab has been holding your straw wrong' }];
+  const candidates = [{ topic: 'Your soda can tab holds your straw the wrong way' }];
+  const result = await topicPolicy.filterCandidates({ candidates, history });
+  assert.equal(result.survivors.length, 0, 'holds/holding must not read as a different fact');
+  assert.equal(result.rejected[0].reason, 'lexical');
+});
+
+test('claim identity excludes the subject so one subject can carry several facts', () => {
+  // Measured separation between duplicates and genuinely different facts:
+  // raw wording -0.151 (anti-correlated), full identity +0.064, claim +0.349.
+  assert.ok(topicPolicy.CLAIM_THRESHOLD > 0 && topicPolicy.CLAIM_THRESHOLD < topicPolicy.SEMANTIC_THRESHOLD);
+});
+
+test('refuses to publish a topic it could not semantically check', async () => {
+  const prior = process.env.TOPIC_DEDUP_REQUIRE_SEMANTIC;
+  process.env.TOPIC_DEDUP_REQUIRE_SEMANTIC = 'true';
+  delete require.cache[require.resolve('../topicPolicy')];
+  const strict = require('../topicPolicy');
+  await assert.rejects(
+    () => strict.filterCandidates({
+      candidates: [{ topic: 'Sharks are older than trees' }],
+      history: [{ topic: 'The Eiffel Tower grows taller in summer' }],
+    }),
+    (err) => err.code === 'TOPIC_DEDUP_SEMANTIC_UNAVAILABLE',
+    'the 500-Short guarantee must not silently degrade to the lexical gate',
+  );
+  process.env.TOPIC_DEDUP_REQUIRE_SEMANTIC = prior;
+  delete require.cache[require.resolve('../topicPolicy')];
 });

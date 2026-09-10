@@ -11,6 +11,21 @@ const EMBEDDING_MODEL = process.env.TOPIC_DEDUP_EMBEDDING_MODEL || "Xenova/all-M
 const SEMANTIC_THRESHOLD = Math.max(0.5, Math.min(0.99, Number(process.env.TOPIC_DEDUP_COSINE_THRESHOLD || 0.82)));
 const HISTORY_LIMIT = Math.max(500, Number(process.env.TOPIC_HISTORY_MAX || 500));
 const EMBEDDING_TIMEOUT_MS = Math.max(1000, Number(process.env.TOPIC_DEDUP_EMBEDDING_TIMEOUT_MS || 30000));
+// Tightened because the fallback is all that stands between a paraphrase and a
+// repeat when embeddings are unavailable.
+const LEXICAL_JACCARD = Math.max(0.2, Math.min(0.9, Number(process.env.TOPIC_DEDUP_LEXICAL_JACCARD || 0.45)));
+const LEXICAL_CONTAINMENT = Math.max(0.2, Math.min(0.95, Number(process.env.TOPIC_DEDUP_LEXICAL_CONTAINMENT || 0.6)));
+// The 500-Short no-repeat horizon is a hard product requirement, so by default a
+// run refuses to pick a topic it could not semantically check at all rather than
+// silently downgrading to the lexical gate.
+const REQUIRE_SEMANTIC = String(process.env.TOPIC_DEDUP_REQUIRE_SEMANTIC || "true").toLowerCase() !== "false";
+// The claim gate deliberately embeds mechanism+payoff WITHOUT the subject.
+// Measured separation between real duplicates and genuinely different facts:
+//   raw topic wording -0.151 (anti-correlated), full identity +0.064,
+//   mechanism+payoff  +0.349.
+// Including the subject makes two different facts about one subject look alike,
+// which is the common case on a channel that revisits recognizable things.
+const CLAIM_THRESHOLD = Math.max(0.1, Math.min(0.95, Number(process.env.TOPIC_DEDUP_CLAIM_THRESHOLD || 0.32)));
 const DISABLE_EMBEDDINGS = String(process.env.TOPIC_DEDUP_DISABLE_EMBEDDINGS || "false").toLowerCase() === "true";
 
 const STOP = new Set([
@@ -55,14 +70,38 @@ function tokenSimilarity(a, b) {
   };
 }
 
+// Crude suffix stripper. Without it "holds" and "holding" are separate tokens,
+// which is enough for a barely-reworded duplicate to clear the lexical gate.
+function stem(word) {
+  let w = String(word || "");
+  for (const suf of ["ingly", "edly", "ing", "ies", "ied", "es", "ed", "ly", "s"]) {
+    if (w.length - suf.length >= 3 && w.endsWith(suf)) { w = w.slice(0, -suf.length); break; }
+  }
+  return w.endsWith("i") ? `${w.slice(0, -1)}y` : w;
+}
+
+function tokenSimilarityStemmed(a, b) {
+  const A = new Set(significantTokens(a).map(stem));
+  const B = new Set(significantTokens(b).map(stem));
+  if (!A.size || !B.size) return { jaccard: 0, containment: 0 };
+  let common = 0;
+  for (const x of A) if (B.has(x)) common++;
+  return {
+    jaccard: common / (A.size + B.size - common),
+    containment: common / Math.min(A.size, B.size),
+  };
+}
+
 function lexicalNearDuplicate(a, b) {
   const na = normalizeText(a);
   const nb = normalizeText(b);
   if (!na || !nb) return false;
   if (na === nb) return true;
   if (Math.min(na.length, nb.length) >= 24 && (na.includes(nb) || nb.includes(na))) return true;
-  const { jaccard, containment } = tokenSimilarity(na, nb);
-  return jaccard >= 0.58 || containment >= 0.76;
+  const raw = tokenSimilarity(na, nb);
+  const stemmed = tokenSimilarityStemmed(na, nb);
+  return Math.max(raw.jaccard, stemmed.jaccard) >= LEXICAL_JACCARD
+    || Math.max(raw.containment, stemmed.containment) >= LEXICAL_CONTAINMENT;
 }
 
 function cosineSimilarity(a, b) {
@@ -211,29 +250,65 @@ async function filterCandidates({ candidates, history, semanticThreshold = SEMAN
     return { survivors: lexicalSurvivors, rejected, semantic_available: false, semantic_threshold: semanticThreshold };
   }
 
-  const historyTexts = used.map((h) => String(h?.topic || h?.picked || "").trim()).filter(Boolean);
-  const candidateTexts = lexicalSurvivors.map((c) => c.topic);
-  const embeddings = await embedTexts([...historyTexts, ...candidateTexts]);
-  const semanticAvailable = candidateTexts.some((t) => embeddings.has(t)) && historyTexts.some((t) => embeddings.has(t));
+  // Compare the semantic identity of the fact (subject + mechanism + payoff),
+  // not its wording. Embedding raw titles misses the duplicates that matter:
+  // "The Eiffel Tower grows 15cm in summer" and "Paris's iron landmark gets
+  // taller when the sun heats its metal" are the same Short, yet score 0.48.
+  const identityOf = (item) => {
+    const parts = [item?.subject_key, item?.mechanism_key, item?.payoff_key].map(normalizeText).filter(Boolean);
+    const topic = String(item?.topic || item?.picked || "").trim();
+    return parts.length >= 2 ? `${parts.join(" ")} ${topic}`.trim() : topic;
+  };
+  const claimOf = (item) => [item?.mechanism_key, item?.payoff_key].map(normalizeText).filter(Boolean).join(" ");
+  const historyEntries = used
+    .map((h) => ({ text: String(h?.topic || h?.picked || "").trim(), identity: identityOf(h), claim: claimOf(h) }))
+    .filter((h) => h.text);
+  const candidateIdentities = new Map(lexicalSurvivors.map((c) => [c.topic, identityOf(c)]));
+  const candidateClaims = new Map(lexicalSurvivors.map((c) => [c.topic, claimOf(c)]));
+  const embeddings = await embedTexts([
+    ...historyEntries.map((h) => h.identity),
+    ...historyEntries.map((h) => h.claim),
+    ...lexicalSurvivors.map((c) => candidateIdentities.get(c.topic)),
+    ...lexicalSurvivors.map((c) => candidateClaims.get(c.topic)),
+  ]);
+  const semanticAvailable = lexicalSurvivors.some((c) => embeddings.has(candidateIdentities.get(c.topic)))
+    && historyEntries.some((h) => embeddings.has(h.identity));
   if (!semanticAvailable) {
+    if (REQUIRE_SEMANTIC) {
+      const err = new Error("TOPIC_DEDUP_SEMANTIC_UNAVAILABLE: refusing to pick a topic that could not be checked against the last "
+        + `${HISTORY_LIMIT} Shorts (embedding model unavailable); set TOPIC_DEDUP_REQUIRE_SEMANTIC=false to publish on the lexical gate alone`);
+      err.code = "TOPIC_DEDUP_SEMANTIC_UNAVAILABLE";
+      throw err;
+    }
     return { survivors: lexicalSurvivors, rejected, semantic_available: false, semantic_threshold: semanticThreshold };
   }
 
   const survivors = [];
   for (const c of lexicalSurvivors) {
-    const cv = embeddings.get(c.topic);
+    const cv = embeddings.get(candidateIdentities.get(c.topic));
+    const cc = embeddings.get(candidateClaims.get(c.topic));
     let best = { similarity: -1, topic: null };
-    if (cv) {
-      for (const ht of historyTexts) {
-        const hv = embeddings.get(ht);
-        const sim = cosineSimilarity(cv, hv);
-        if (sim != null && sim > best.similarity) best = { similarity: sim, topic: ht };
+    let bestClaim = { similarity: -1, topic: null };
+    for (const h of historyEntries) {
+      if (cv) {
+        const sim = cosineSimilarity(cv, embeddings.get(h.identity));
+        if (sim != null && sim > best.similarity) best = { similarity: sim, topic: h.text };
+      }
+      if (cc) {
+        const sim = cosineSimilarity(cc, embeddings.get(h.claim));
+        if (sim != null && sim > bestClaim.similarity) bestClaim = { similarity: sim, topic: h.text };
       }
     }
-    if (best.similarity >= semanticThreshold) {
+    if (bestClaim.similarity >= CLAIM_THRESHOLD) {
+      rejected.push({ topic: c.topic, reason: "semantic_claim", matched_topic: bestClaim.topic, similarity: Number(bestClaim.similarity.toFixed(4)) });
+    } else if (best.similarity >= semanticThreshold) {
       rejected.push({ topic: c.topic, reason: "semantic", matched_topic: best.topic, similarity: Number(best.similarity.toFixed(4)) });
     } else {
-      survivors.push({ ...c, max_history_similarity: best.similarity >= 0 ? Number(best.similarity.toFixed(4)) : null });
+      survivors.push({
+        ...c,
+        max_history_similarity: best.similarity >= 0 ? Number(best.similarity.toFixed(4)) : null,
+        max_history_claim_similarity: bestClaim.similarity >= 0 ? Number(bestClaim.similarity.toFixed(4)) : null,
+      });
     }
   }
   return { survivors, rejected, semantic_available: true, semantic_threshold: semanticThreshold };
@@ -277,6 +352,7 @@ async function shortlistCandidates({ candidates, desired_strategy_arm, seed, his
 module.exports = {
   HISTORY_LIMIT,
   SEMANTIC_THRESHOLD,
+  CLAIM_THRESHOLD,
   normalizeText,
   significantTokens,
   canonicalKey,
