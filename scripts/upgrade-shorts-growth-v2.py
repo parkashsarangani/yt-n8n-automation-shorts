@@ -294,8 +294,109 @@ const DAY=86400000;const end=new Date();const start=new Date(end.getTime()-60*DA
     analytics["parameters"]["url"] = "=https://youtubeanalytics.googleapis.com/v2/reports?ids=channel==MINE&startDate={{ $json.start_date || $('Build Analytics Window').item.json.startDate }}&endDate={{ $json.end_date || $('Build Analytics Window').item.json.endDate }}&metrics=views,engagedViews,averageViewPercentage,averageViewDuration,subscribersGained,likes,comments,shares&dimensions=video&filters=video=={{ ($json.video_ids || []).join(',') }}"
 
 
+MECHANICAL_REPAIR_MARKER = "V5_MECHANICAL_FIELD_REPAIR"
+
+MECHANICAL_REPAIR_JS = r'''// V5_MECHANICAL_FIELD_REPAIR: repair every field the script itself determines,
+// before any check reads it.
+//
+// Six separate fields have each cost a full scheduled upload when the model
+// omitted one (tags, comment_hook, visual_plan_quality, scene count,
+// visual_proof_mode, length_exception_reason). They were all mechanically
+// derivable, so rejecting a publishable Short over any of them trades a
+// guaranteed loss for a cosmetic gain.
+//
+// DELIBERATELY NOT REPAIRED - these are real editorial or policy judgements and
+// must still fail: narration content and the word floor, the quality.* score
+// gates, the medical/health exclusion, and the topic-substitution backstop.
+const _mfRepairs=[];
+const _mfNote=(f)=>{if(!_mfRepairs.includes(f))_mfRepairs.push(f);};
+const _mfText=(v)=>String(v==null?'':v).replace(/\s+/g,' ').trim();
+const _mfQuery=(v)=>_mfText(v).toLowerCase().replace(/[^a-z0-9 ]+/g,' ').replace(/\s+/g,' ').trim().split(' ').filter(Boolean).slice(0,5).join(' ');
+const _mfWords=(v)=>_mfQuery(v).split(' ').filter(Boolean).length;
+
+const _mfTitle=_mfText(parsed.title);
+if(!_mfTitle||_mfTitle.length<5||_mfTitle.length>60){
+  const base=_mfTitle||_mfText(parsed.hook)||'Did You Know';
+  parsed.title=base.length>60?base.slice(0,57).replace(/\s+\S*$/,'')+'...':base;
+  _mfNote('title');
+}
+if(_mfText(parsed.seo_description).length<20){
+  parsed.seo_description=[_mfText(parsed.hook),_mfText(parsed.full_script)].filter(Boolean).join(' ').slice(0,300)||_mfText(parsed.title);
+  _mfNote('seo_description');
+}
+if(!parsed.first_frame_type){parsed.first_frame_type='hero_motion';_mfNote('first_frame_type');}
+if(!parsed.transition_style){parsed.transition_style='hard_cut';_mfNote('transition_style');}
+if(!Number.isFinite(Number(parsed.open_loop_count))){parsed.open_loop_count=0;_mfNote('open_loop_count');}
+const _mfEngagement=['none','comment_only','share_only','comment_and_share'];
+if(!_mfEngagement.includes(parsed.engagement_mode)){
+  parsed.engagement_mode=_mfText(parsed.comment_hook)?'comment_only':'none';
+  _mfNote('engagement_mode');
+}
+
+if(Array.isArray(parsed.scenes)){
+  parsed.scenes.forEach((s,i)=>{
+    if(!s||typeof s!=='object')return;
+    if(s.template_data&&s.template_data.is_outro)return;
+    if(typeof s.scene_index!=='number'||!Number.isFinite(s.scene_index)){s.scene_index=i;_mfNote('scene_index');}
+    if(_mfText(s.point).length<3){
+      s.point=_mfText(s.narration).split(' ').slice(0,6).join(' ')||('beat '+s.scene_index);
+      _mfNote('point');
+    }
+    ['required_entities','required_actions','required_relationships','acceptable_visuals'].forEach((k)=>{
+      if(!Array.isArray(s[k])){s[k]=[];_mfNote(k);}
+    });
+    if(!Array.isArray(s.forbidden_visuals)||!s.forbidden_visuals.length){
+      s.forbidden_visuals=['generic unrelated stock footage'];
+      _mfNote('forbidden_visuals');
+    }
+    if(_mfText(s.visual_claim).length<8){
+      s.visual_claim=_mfText(s.narration).slice(0,140)||_mfText(s.point);
+      _mfNote('visual_claim');
+    }
+    if(s.visual_source!=='template'){
+      if(_mfText(s.visual_prompt).length<20){
+        s.visual_prompt=(_mfText(s.visual_claim)+', documentary footage').slice(0,180);
+        _mfNote('visual_prompt');
+      }
+      if(!_mfText(s.negative_prompt)){
+        s.negative_prompt='no readable text, no legible numbers, no watermarks';
+        _mfNote('negative_prompt');
+      }
+      const _mfSubject=_mfText(s.named_subject||parsed.global_subject||s.point);
+      const _mfSeen=[];
+      const _mfAdd=(v)=>{const q=_mfQuery(v);if(_mfWords(q)>=2&&_mfWords(q)<=5&&!_mfSeen.includes(q))_mfSeen.push(q);};
+      (Array.isArray(s.search_queries)?s.search_queries:[]).forEach(_mfAdd);
+      if(_mfSeen.length<3){
+        [s.stock_search_query,s.visual_claim,_mfSubject+' real footage',_mfSubject+' archival photo',_mfSubject+' close up','real world footage'].forEach(_mfAdd);
+        if(_mfSeen.length>=3)_mfNote('search_queries');
+      }
+      if(_mfSeen.length)s.search_queries=_mfSeen.slice(0,4);
+      if(!_mfText(s.stock_search_query)&&s.search_queries&&s.search_queries.length){
+        s.stock_search_query=s.search_queries[0];
+        _mfNote('stock_search_query');
+      }
+    }
+  });
+}
+if(_mfRepairs.length)parsed.mechanical_repairs=_mfRepairs;
+'''
+
+
+def patch_mechanical_field_repair(w: dict) -> None:
+    """Repair derivable fields before any validator check reads them."""
+    validator = node_by_name(w, "Validate Final Script")
+    code = str(validator["parameters"]["jsCode"])
+    if MECHANICAL_REPAIR_MARKER in code:
+        return
+    anchor = "const errors = [];"
+    if anchor not in code:
+        raise ValueError("validator error-collection anchor missing")
+    validator["parameters"]["jsCode"] = code.replace(anchor, MECHANICAL_REPAIR_JS + "\n" + anchor, 1)
+
+
 def upgrade(w: dict) -> dict:
     patch_topic_policy(w)
+    patch_mechanical_field_repair(w)
     patch_writer_and_duration(w)
     patch_merge_script_passthrough(w)
     patch_compose_payload_and_logging(w)
