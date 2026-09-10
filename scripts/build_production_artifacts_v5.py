@@ -230,6 +230,19 @@ const _vmDemote=(s,reason)=>{
 };
 if(Array.isArray(parsed.scenes)){
   const _vmContent=parsed.scenes.filter(s=>s&&!_vmIsOutro(s)).sort((a,b)=>Number(a?.scene_index??9999)-Number(b?.scene_index??9999));
+  // V5_PROOF_MODE_BACKSTOP: visual_proof_mode is a routing label the scene's own
+  // shape already determines, but a model that omits it failed every repair
+  // attempt and lost the upload (execution 806, "scene 1 invalid
+  // visual_proof_mode=undefined"). Infer it rather than reject the script.
+  const _vmValidModes=new Set(['literal_video','literal_image','annotated_real','comparison','number_visualization','kinetic_text','diagram','timeline','map']);
+  const _vmProofByTemplate={comparison:'comparison',stat_reveal:'number_visualization',kinetic_text:'kinetic_text',diagram:'diagram',timeline:'timeline',map:'map'};
+  _vmContent.forEach(s=>{
+    if(_vmValidModes.has(String(s?.visual_proof_mode||'')))return;
+    const mapped=_vmProofByTemplate[String(s?.template_name||'')];
+    if(s?.visual_source==='template'&&mapped)s.visual_proof_mode=mapped;
+    else s.visual_proof_mode=(Array.isArray(s?.required_actions)&&s.required_actions.length)?'literal_video':'literal_image';
+    s.visual_mix_repair_reason=s.visual_mix_repair_reason||'proof_mode_inferred';
+  });
   // Any template with an invalid/non-deterministic proof mode is safer as real media.
   _vmContent.filter(s=>s?.visual_source==='template'&&!_vmTemplateModes.has(String(s?.visual_proof_mode||''))).forEach(s=>_vmDemote(s,'invalid_template_mode_forced_real_media'));
   const _vmOpening=_vmContent.find(s=>Number(s?.scene_index)===0)||_vmContent[0];
