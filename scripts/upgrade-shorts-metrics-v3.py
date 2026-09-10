@@ -80,6 +80,23 @@ def add_deep_metric_pass(workflow: dict) -> None:
         "startDate={{ $('Build Analytics Window').item.json.startDate }}"
         "&endDate={{ $('Build Analytics Window').item.json.endDate }}"
     )
+    if "Expand Videos For Deep Metrics" not in names:
+        # "Get Shorts to Measure" emits ONE item holding a video_ids array, and
+        # this branch hangs off Ingest Analytics, whose output is the ingest
+        # response. Without expanding first the loop ran a single iteration with
+        # an empty id and the API rejected the filter as "Invalid value ()".
+        workflow["nodes"].append({
+            "parameters": {"jsCode": (
+                "// SHORTS_METRICS_V3: one item per video so the per-video reports can loop.\n"
+                "const ids = $('Get Shorts to Measure').first().json.video_ids || [];\n"
+                "return ids.filter(Boolean).map((video_id) => ({ json: { video_id: String(video_id) } }));"
+            )},
+            "id": "c9b4e2a1-77d3-4c58-9f36-2ab8e7d41199",
+            "name": "Expand Videos For Deep Metrics",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [6980, 1200],
+        })
     if "Split Videos For Deep Metrics" not in names:
         workflow["nodes"].append({
             "parameters": {"batchSize": 1, "options": {}},
@@ -173,7 +190,8 @@ def add_deep_metric_pass(workflow: dict) -> None:
         })
 
     conns = workflow.setdefault("connections", {})
-    conns["Ingest Analytics"] = {"main": [[{"node": "Split Videos For Deep Metrics", "type": "main", "index": 0}]]}
+    conns["Ingest Analytics"] = {"main": [[{"node": "Expand Videos For Deep Metrics", "type": "main", "index": 0}]]}
+    conns["Expand Videos For Deep Metrics"] = {"main": [[{"node": "Split Videos For Deep Metrics", "type": "main", "index": 0}]]}
     # splitInBatches v3: output 0 is "done", output 1 is the per-item loop.
     conns["Split Videos For Deep Metrics"] = {"main": [
         [{"node": "Build Deep Metrics Payload", "type": "main", "index": 0}],
@@ -210,6 +228,11 @@ def assert_applied(workflow: dict) -> None:
         raise RuntimeError("deep-metric loop branch is not wired to the retention report")
     if conns.get("Collect Deep Metrics", {}).get("main", [[]])[0][0]["node"] != "Split Videos For Deep Metrics":
         raise RuntimeError("deep-metric loop does not return to the batch splitter")
+    if conns.get("Ingest Analytics", {}).get("main", [[]])[0][0]["node"] != "Expand Videos For Deep Metrics":
+        raise RuntimeError("deep-metric pass must expand video_ids into per-video items before looping")
+    expander = str(node_by_name(workflow, "Expand Videos For Deep Metrics").get("parameters", {}).get("jsCode", ""))
+    if "video_ids" not in expander:
+        raise RuntimeError("deep-metric expander does not read the measured video_ids")
     ingest_body = str(node_by_name(workflow, "Ingest Deep Metrics").get("parameters", {}).get("jsonBody", ""))
     if "getWorkflowStaticData" in ingest_body:
         raise RuntimeError("deep-metric ingest body uses a Code-node helper that HTTP expressions cannot resolve")
