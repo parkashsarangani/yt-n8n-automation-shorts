@@ -147,6 +147,27 @@ def patch_writer_and_duration(w: dict) -> None:
     body = body.replace("(this channel's data: number-led titles average 3.5x fewer views) ", "")
     body = body.replace("this channel's data: number-led titles average 3.5x fewer views", "current measured guidance decides whether withholding is helping this channel")
 
+    # The seed prompt still carries the pre-V2 length policy. Left in place it
+    # does not merely permit 120 words, it explicitly disclaims the correct
+    # target ("not a fixed 60-90/3-4 target"), so the model overshoots the
+    # 105-word ceiling and the script is rejected - execution 808 lost an upload
+    # at 121 words. There must be exactly one length policy in this prompt.
+    legacy_length = [
+        (
+            "never run past roughly 40 seconds (about 120 words) - if the topic needs more than that to land, "
+            "it was too big a topic for this format, not license to run long. Floor: at least 3 scenes and about 40 words",
+            "keep the FINAL rendered Short inside 28-36 seconds - if the topic needs more than that to land, "
+            "it was too big a topic for this format, not license to run long. Floor: at least 3 scenes",
+        ),
+        (
+            "within the 40-120 word / 3+ scene bounds from LENGTH IS YOUR CALL above (not a fixed 60-90/3-4 target)",
+            "within the 65-95 content-word / 3+ scene target from the DURATION TARGET above (105 content words is an absolute ceiling)",
+        ),
+    ]
+    for old, new in legacy_length:
+        if old in body:
+            body = body.replace(old, new, 1)
+
     if f"{MARKER} DYNAMIC PERFORMANCE GUIDANCE" not in body:
         hook_anchor = "HOOK - the single most important sentence in the video."
         dynamic = (
@@ -245,6 +266,52 @@ def _unpair(expression: str) -> str:
     return expression.replace(").item.json", ").first().json")
 
 
+ACCEPTED_SCRIPT_NODE = "Capture Accepted Script"
+
+
+def patch_accepted_script_capture(w: dict) -> None:
+    """Give the merge a single-run source for the accepted script.
+
+    "Validate Final Script" runs once per attempt, so after a repair it has two
+    or three runs and no expression can say which one is meant: .item resolved
+    to undefined and .first() resolved to run 0, the REJECTED attempt. Reading
+    it downstream is unsafe by construction, not just fragile.
+
+    "If Script Valid" only emits on its true output for the attempt that passed,
+    so a node placed there executes exactly once per execution and carries the
+    accepted script by definition. That node is then the one unambiguous source
+    for everything after it.
+    """
+    names = {n.get("name") for n in w.get("nodes", [])}
+    if ACCEPTED_SCRIPT_NODE not in names:
+        w["nodes"].append({
+            "id": "b8e5c1a9-4f27-4d63-9a18-6c0f7d2e3b55",
+            "name": ACCEPTED_SCRIPT_NODE,
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [4300, 300],
+            "parameters": {"jsCode": (
+                "// V5_ACCEPTED_SCRIPT_HANDOFF: runs only on the validated attempt, so this\n"
+                "// is the accepted script by construction - no run-index guessing anywhere.\n"
+                "const accepted = $input.first().json;\n"
+                "if (!accepted || accepted._scriptValid !== true) {\n"
+                "  throw new Error('Capture Accepted Script received a script that did not pass validation');\n"
+                "}\n"
+                "return { json: { ...accepted, script_snapshot: accepted } };"
+            )},
+        })
+    conns = w.setdefault("connections", {})
+    valid = conns.get("If Script Valid", {}).get("main", [])
+    if not valid:
+        raise ValueError("If Script Valid connections missing")
+    # Interpose on the accepted branch, preserving its existing targets.
+    downstream = [t for t in valid[0] if t.get("node") != ACCEPTED_SCRIPT_NODE]
+    if downstream:
+        conns[ACCEPTED_SCRIPT_NODE] = {"main": [downstream]}
+        valid[0] = [{"node": ACCEPTED_SCRIPT_NODE, "type": "main", "index": 0}]
+    conns["If Script Valid"] = {"main": valid}
+
+
 def patch_merge_script_passthrough(w: dict) -> None:
     """Carry the validated script through the merge instead of re-reading it.
 
@@ -257,21 +324,33 @@ def patch_merge_script_passthrough(w: dict) -> None:
     """
     merge = node_by_name(w, "Merge By scene_index (not position)")
     code = str(merge["parameters"]["jsCode"])
-    if "script_snapshot" in code:
-        return
-    anchor = "publication_description:publicationDescription,data:merged}};"
-    if anchor not in code:
-        raise ValueError("merge return anchor missing; cannot pass the script through")
-    merge["parameters"]["jsCode"] = code.replace(
-        anchor,
-        "publication_description:publicationDescription,"
-        "policy_version:$('Merge By scene_index (not position)').first().json.script_snapshot.policy_version||'shorts-growth-v2',"
-        "outro_experiment_arm:$('Merge By scene_index (not position)').first().json.script_snapshot.outro_experiment_arm||'no_outro',"
-        "outro_line:$('Merge By scene_index (not position)').first().json.script_snapshot.outro_line??null,"
-        "script_snapshot:$('Merge By scene_index (not position)').first().json.script_snapshot,"
-        "data:merged}};",
-        1,
-    )
+
+    # Every read of the multi-run validator becomes a read of the single-run
+    # capture node, which carries the accepted script by construction.
+    accepted = f"$('{ACCEPTED_SCRIPT_NODE}').first().json"
+    code = code.replace("$('Validate Final Script').item.json", accepted)
+    code = code.replace("$('Validate Final Script').first().json", accepted)
+
+    if "script_snapshot:" not in code:
+        anchor = "publication_description:publicationDescription,data:merged}};"
+        if anchor not in code:
+            raise ValueError("merge return anchor missing; cannot pass the script through")
+        code = code.replace(
+            anchor,
+            "publication_description:publicationDescription,"
+            f"policy_version:{accepted}.policy_version||'shorts-growth-v2',"
+            f"outro_experiment_arm:{accepted}.outro_experiment_arm||'no_outro',"
+            f"outro_line:{accepted}.outro_line??null,"
+            f"script_snapshot:{accepted}.script_snapshot,"
+            "data:merged}};",
+            1,
+        )
+
+    # A node that reads its own output produces undefined. An earlier blanket
+    # rewrite introduced exactly that here, so make it impossible to ship again.
+    if "$('Merge By scene_index (not position)')" in code:
+        raise ValueError("merge node must never read its own output")
+    merge["parameters"]["jsCode"] = code
 
 
 def patch_compose_payload_and_logging(w: dict) -> None:
@@ -398,6 +477,7 @@ def upgrade(w: dict) -> dict:
     patch_topic_policy(w)
     patch_mechanical_field_repair(w)
     patch_writer_and_duration(w)
+    patch_accepted_script_capture(w)
     patch_merge_script_passthrough(w)
     patch_compose_payload_and_logging(w)
     patch_measurement_workflow(w)
