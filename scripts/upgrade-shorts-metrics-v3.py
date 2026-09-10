@@ -56,8 +56,10 @@ def add_deep_metric_pass(workflow: dict) -> None:
         return {
             "parameters": {
                 "url": url,
-                "authentication": "predefinedCredentialType",
-                "nodePredefinedCredentialType": "youTubeOAuth2Api",
+                # Match the batch analytics node exactly: these call the same
+                # API with the same generic OAuth2 credential.
+                "authentication": "genericCredentialType",
+                "genericAuthType": "oAuth2Api",
                 "options": {"timeout": 30000, "response": {"response": {"neverError": True}}},
             },
             "id": node_id,

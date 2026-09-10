@@ -264,3 +264,42 @@ test('deep metrics attach to the newest frozen cohort, never a new bucket', asyn
   if (prior === undefined) delete process.env.TOPIC_HISTORY_PATH; else process.env.TOPIC_HISTORY_PATH = prior;
   delete require.cache[require.resolve('../feedbackLoop')];
 });
+
+test('analytics ingest refuses an API error masquerading as a measurement', async () => {
+  // The HTTP node returns the API error as its output body, so this exact
+  // payload is what silently produced 12 videos with metrics:null.
+  await assert.rejects(
+    () => feedback.ingestAnalytics({ error: 'Credential with ID "REPLACE_WITH_ANALYTICS_OAUTH_CRED" does not exist for type "oAuth2Api".' }),
+    /analytics ingest rejected/,
+    'a measurement pass that cannot measure must fail loudly',
+  );
+});
+
+test('analytics ingest refuses a payload with no video dimension', async () => {
+  await assert.rejects(
+    () => feedback.ingestAnalytics({ columnHeaders: [{ name: 'views' }], rows: [[5]] }),
+    /no 'video' dimension/,
+  );
+});
+
+test('analytics ingest still accepts a genuine empty measurement window', async () => {
+  // This one reaches the write path, so it needs a writable data dir - the
+  // default resolves under /app, which is not writable in CI.
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ingest-empty-'));
+  const prior = process.env.TOPIC_HISTORY_PATH;
+  process.env.TOPIC_HISTORY_PATH = path.join(dir, 'topic_history.json');
+  delete require.cache[require.resolve('../feedbackLoop')];
+  const fb = require('../feedbackLoop');
+
+  const result = await fb.ingestAnalytics({
+    columnHeaders: [{ name: 'video' }, { name: 'views' }],
+    rows: [],
+  });
+  assert.equal(result.updated, 0, 'zero rows is legitimate; only an unmeasurable payload should throw');
+
+  if (prior === undefined) delete process.env.TOPIC_HISTORY_PATH; else process.env.TOPIC_HISTORY_PATH = prior;
+  delete require.cache[require.resolve('../feedbackLoop')];
+});

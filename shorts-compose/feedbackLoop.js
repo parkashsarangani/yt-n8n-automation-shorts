@@ -426,8 +426,29 @@ async function runStrategist(history) {
   return insights;
 }
 
+// The analytics HTTP node returns an API error as its output BODY rather than
+// failing, so a broken credential looked exactly like a successful measurement
+// with nothing to record. That is how 12 published Shorts reached this function
+// with metrics:null while every run reported success and the strategist kept
+// producing guidance from sample_size 0. A measurement pass that cannot measure
+// has to be visible, so refuse the payload instead of silently recording zero.
+function assertMeasurablePayload(analyticsBody, raw) {
+  const apiError = (analyticsBody && analyticsBody.error) || (raw && raw.error);
+  if (apiError) {
+    const detail = typeof apiError === "string" ? apiError : (apiError.message || JSON.stringify(apiError));
+    throw new Error(`analytics ingest rejected: the analytics API returned an error instead of data (${detail})`);
+  }
+  if (!analyticsBody || !Array.isArray(analyticsBody.columnHeaders)) {
+    throw new Error("analytics ingest rejected: payload has no columnHeaders, so nothing was actually measured");
+  }
+  if (!analyticsBody.columnHeaders.some((h) => h && h.name === "video")) {
+    throw new Error("analytics ingest rejected: payload has no 'video' dimension, so rows cannot be attributed");
+  }
+}
+
 async function ingestAnalytics(body) {
   const analyticsBody = body && body.analytics && body.analytics.columnHeaders ? body.analytics : body;
+  assertMeasurablePayload(analyticsBody, body);
   const metricsById = parseAnalytics(analyticsBody);
   const hist = await readJson(PERF_PATH, []);
   let updated = 0;
