@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -21,6 +22,14 @@ INTERNAL_SERVICE_ORIGIN = "http://shorts-compose:4000"
 PUBLIC_SERVICE_ORIGIN = "https://shorts.interviewbuddy.cloud"
 LLM_GATEWAY_ORIGIN = "http://llm-gateway:3100"
 REAL_MEDIA_MIX_GUARD = "V5_REAL_MEDIA_MIX_GUARD"
+# The seed ships an unsubstituted placeholder, which n8n rejects at runtime with
+# "Credential ... does not exist". Because the analytics node returns that error
+# as its output body instead of failing, the whole feedback loop measured
+# nothing for months without a single failed run. Substituting a real id here
+# makes the wiring explicit and checkable at build time.
+ANALYTICS_CRED_PLACEHOLDER = "REPLACE_WITH_ANALYTICS_OAUTH_CRED"
+ANALYTICS_CRED_ID = os.environ.get("N8N_ANALYTICS_CRED_ID", "").strip()
+ANALYTICS_CRED_NAME = os.environ.get("N8N_ANALYTICS_CRED_NAME", "YouTube Analytics OAuth2").strip()
 
 
 def run(*args: str, cwd: Path) -> None:
@@ -311,6 +320,27 @@ def add_resolver_topology(workflow: dict) -> None:
     resolver["parameters"].setdefault("options", {})["timeout"] = 160000
 
 
+def bind_analytics_credential(workflow: dict) -> None:
+    """Replace the analytics credential placeholder with a real credential id.
+
+    Without N8N_ANALYTICS_CRED_ID set, the placeholder is left in place but the
+    node is flagged so the deploy audit can report that measurement is still
+    disconnected, rather than letting it fail silently forever.
+    """
+    for node in workflow.get("nodes", []):
+        creds = node.get("credentials") or {}
+        for cred_type, cred in list(creds.items()):
+            if not isinstance(cred, dict) or cred.get("id") != ANALYTICS_CRED_PLACEHOLDER:
+                continue
+            if ANALYTICS_CRED_ID:
+                cred["id"] = ANALYTICS_CRED_ID
+                if ANALYTICS_CRED_NAME:
+                    cred["name"] = ANALYTICS_CRED_NAME
+                workflow.setdefault("meta", {})["analytics_credential_bound"] = True
+            else:
+                workflow.setdefault("meta", {})["analytics_credential_bound"] = False
+
+
 def postprocess_workflow(path: Path) -> None:
     workflow = json.loads(path.read_text())
     internalize_compose_service_urls(workflow)
@@ -320,6 +350,7 @@ def postprocess_workflow(path: Path) -> None:
     replace_merge_node(workflow)
     patch_publication_metadata(workflow)
     add_resolver_topology(workflow)
+    bind_analytics_credential(workflow)
     routed = route_llm_http_nodes(workflow)
     if routed < 1:
         raise RuntimeError("production workflow contains no routed LLM nodes; provider routing contract was lost")
