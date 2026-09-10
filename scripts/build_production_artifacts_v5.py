@@ -89,6 +89,27 @@ def route_llm_http_nodes(workflow: dict) -> int:
     return routed
 
 
+def harden_llm_node_transport(workflow: dict) -> int:
+    """Retry gateway calls that fail at the transport layer.
+
+    A single aborted connection to the gateway ("The connection was aborted")
+    kills the whole scheduled run, because an HTTP node error is fatal and never
+    reaches the script retry loop. These calls are idempotent generations, so a
+    bounded retry is the cheapest possible protection for a scheduled upload.
+    """
+    hardened = 0
+    for node in workflow.get("nodes", []):
+        url = node.get("parameters", {}).get("url")
+        if not isinstance(url, str) or not url.startswith(LLM_GATEWAY_ORIGIN):
+            continue
+        node["retryOnFail"] = True
+        node["maxTries"] = 3
+        node["waitBetweenTries"] = 3000
+        hardened += 1
+    workflow.setdefault("meta", {})["llm_gateway_retry_nodes"] = hardened
+    return hardened
+
+
 def clean_visual_director_annotation_contract(workflow: dict) -> None:
     """Redefine annotated_real as a clean verified still, not a CV overlay task."""
     visual = node_by_name(workflow, "Claude: Visual Director")
@@ -149,9 +170,14 @@ def enforce_real_media_mix(workflow: dict) -> None:
     validator = node_by_name(workflow, "Validate Final Script")
     code = str(validator.get("parameters", {}).get("jsCode", ""))
     if REAL_MEDIA_MIX_GUARD not in code:
-        anchor = "// VISUAL_MATCHING_V4 contract gate."
+        # The guard must repair the scene mix BEFORE any check reads it. The
+        # inherited validator has its own template-cap check inside the scenes
+        # block, so anchoring on the later V4 gate let that earlier check push a
+        # "2 Remotion template scenes" error the guard then silently fixed -
+        # the script still failed, exhausted its retries and lost the upload.
+        anchor = "if (!Array.isArray(parsed.scenes) || parsed.scenes.length < 3"
         if anchor not in code:
-            raise RuntimeError("final validator lost VISUAL_MATCHING_V4 gate; cannot install real-media mix guard")
+            raise RuntimeError("final validator lost the scenes-validation block; cannot install real-media mix guard")
         guard = r'''// V5_REAL_MEDIA_MIX_GUARD: the episode visual mix is a deterministic runtime contract, not an LLM suggestion.
 const _vmTemplateModes=new Set(['comparison','number_visualization','kinetic_text','diagram','timeline','map']);
 const _vmTemplateNames=new Set(['comparison','stat_reveal','kinetic_text','diagram','timeline','map']);
@@ -297,6 +323,8 @@ def postprocess_workflow(path: Path) -> None:
     routed = route_llm_http_nodes(workflow)
     if routed < 1:
         raise RuntimeError("production workflow contains no routed LLM nodes; provider routing contract was lost")
+    if harden_llm_node_transport(workflow) != routed:
+        raise RuntimeError("not every routed LLM node got a bounded transport retry")
     workflow.setdefault("meta", {})["production_build_version"] = BUILD_VERSION
     workflow["meta"]["compose_service_transport"] = "docker_internal"
     path.write_text(json.dumps(workflow, indent=2) + "\n")
