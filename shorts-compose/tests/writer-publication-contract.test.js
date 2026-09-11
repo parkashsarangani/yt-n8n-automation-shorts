@@ -162,3 +162,16 @@ test('TTS and upload metadata use accepted values when rejected validator reads 
   assert.equal(evalExpression(upload.options.tags,{},lookup),'a,b,c,d,e');
   for(const name of ['Disclose AI-Generated Content','Post First Comment']) assert.doesNotThrow(()=>JSON.parse(evalExpression(body(name),{id:'video-id'},lookup)));
 });
+
+test('compose body is a bare $json reference, never a spread+stringify reconstruction', {skip:skipReason}, () => {
+  // Executions 802/804/805/814 all failed at Start Compose Job with
+  // "\"undefined\" is not valid JSON". Root cause (confirmed with @n8n/tournament
+  // directly against a real 741KB payload): n8n's legacy expression interpreter
+  // silently fails - swallowed by a no-op error handler - when asked to perform
+  // object-spread reconstruction plus JSON.stringify on an object this size
+  // inside the expression itself, even though it can return the same object as
+  // a bare reference just fine. Merge already writes the same fields with the
+  // same defaults onto its own output, so no reconstruction is needed at all.
+  const startCompose = body('Start Compose Job');
+  assert.equal(startCompose.trim(), "={{ $json }}", 'Start Compose Job must not reconstruct its body inside the expression');
+});
