@@ -6,22 +6,24 @@ const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 
 // These assertions are about the GENERATED workflow, not the seed, so build it.
-// Skips rather than fails where python is unavailable, matching the rest of the
-// suite's capability-probe convention.
+// Only unavailable Python skips; production build failures must fail this suite.
 const REPO = path.join(__dirname, '..', '..');
 let workflow = null;
 let skipReason = false;
-try {
+let python;
+for (const candidate of ['python', 'python3']) {
+  try { execFileSync(candidate, ['--version'], {stdio:'ignore'}); python=candidate; break; }
+  catch { /* probe interpreter availability only */ }
+}
+if (!python) {
+  skipReason = 'Python interpreter unavailable';
+} else {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'wpc-'));
-  for (const py of ['python', 'python3']) {
-    try {
-      execFileSync(py, ['scripts/build_production_artifacts.py', '--output-dir', out], { cwd: REPO, stdio: 'ignore' });
-      break;
-    } catch { /* try the next interpreter */ }
-  }
-  workflow = JSON.parse(fs.readFileSync(path.join(out, 'workflow.json'), 'utf8'));
-} catch (err) {
-  skipReason = `could not build production artifacts here (${err.message})`;
+  try {
+    // A broken build must fail the test, never silently skip it or read stale output.
+    execFileSync(python, ['scripts/build_production_artifacts.py', '--output-dir', out], {cwd:REPO,stdio:'pipe'});
+    workflow = JSON.parse(fs.readFileSync(path.join(out, 'workflow.json'), 'utf8'));
+  } finally { fs.rmSync(out, {recursive:true,force:true}); }
 }
 
 const node = (name) => workflow.nodes.find((n) => n.name === name);
@@ -80,4 +82,83 @@ test('no HTTP expression uses a Code-node-only helper', { skip: skipReason }, ()
     const params = JSON.stringify(n.parameters || {});
     assert.ok(!params.includes('getWorkflowStaticData'), `${n.name} uses getWorkflowStaticData in an HTTP expression`);
   }
+});
+
+function evalExpression(value, json, lookup) {
+  return new Function('$json', '$', '$execution', `return (${value.slice(3, -2)});`)(json, lookup, {id:'contract'});
+}
+const wrapped = content => ({choices:[{finish_reason:'stop',message:{content:JSON.stringify(content)}}]});
+function draftFixture() {
+  const quality = Object.fromEntries(['concept_strength','hook_strength','evidence_strength','payoff_strength','information_density','first_frame_strength','visual_progression','shareability','naturalness','distinctiveness','voice_specificity','overall'].map(k=>[k,80]));
+  return {hook:'a real hook that is long enough',title:'Accepted title',caption_style:'upbeat',trigger:'disbelief',caption_mode:'karaoke',creative_format:'documentary_cinematic',first_frame_type:'hero_motion',visual_plan_quality:84,
+    tags:['a','b','c','d','e'],seo_description:'a description that is long enough to satisfy the minimum length check',payoff:{claim:'a specific promise the hook makes',resolved_in_scene:2},quality,
+    scenes:[0,1,2].map(scene_index=>({scene_index,point:'the point of this scene',narration:'a real narration line that is definitely long enough to pass with clear evidence here',visual_source:'stock',visual_type:'real',visual_prompt:'a real visual prompt describing this specific scene in detail',negative_prompt:'no readable text',stock_search_query:'visible subject action',search_queries:['visible subject action','subject evidence','subject detail'],visual_role:'hero',visual_claim:'a literal visible scene proof',global_subject:'a recognizable broad topic',required_entities:['visible subject'],required_actions:['visible action'],required_relationships:[],forbidden_visuals:['unrelated filler'],acceptable_visuals:[],visual_proof_mode:'literal_video',visual_mode:'exact_real',must_show:'visible subject action',source_priority:['pexels','wikimedia'],template_fallback:{template_name:'kinetic_text',template_data:{line:'fallback'}}}))};
+}
+function validatePartial(partial, draft, state={}) {
+  const lookup = name => {
+    if(name==='Parse Draft JSON') return {first:()=>({json:{draft}}),item:{json:{draft}}};
+    if(name==='Extract Generated Topic') return {item:{json:{topic:''}}};
+    throw Error(`unexpected read ${name}`);
+  };
+  return new Function('$input','$','$execution','$getWorkflowStaticData',code('Validate Final Script'))({first:()=>({json:wrapped(partial)})},lookup,{id:'contract'},()=>state).json;
+}
+
+test('partial director output recovers empty/absent scenes and keeps indexed patches on their own scenes', {skip:skipReason}, () => {
+  const draft=draftFixture();
+  for(const partial of [{creative_format:'documentary_cinematic'}, {hook:draft.hook, scenes:[]}, {hook:draft.hook,scenes:[{scene_index:2,visual_claim:'ONLY THIRD SCENE'}]}]) {
+    const result=validatePartial(partial,draft);
+    assert.equal(result._scriptValid,true,JSON.stringify(result._validationErrors));
+    assert.equal(result.visual_director_recovered,true);
+    assert.deepEqual(result.scenes.filter(s=>!s.template_data?.is_outro).map(s=>s.narration),draft.scenes.map(s=>s.narration));
+    if(partial.scenes?.length) {
+      assert.notEqual(result.scenes[0].visual_claim,'ONLY THIRD SCENE');
+      assert.equal(result.scenes[2].visual_claim,'ONLY THIRD SCENE');
+    }
+  }
+});
+
+test('partial recovery cannot invent missing editorial scores or narration', {skip:skipReason}, () => {
+  const draft=draftFixture();delete draft.quality;
+  const missingQuality=validatePartial({creative_format:'minimal_proof'},draft);
+  assert.equal(missingQuality._scriptValid,false);
+  assert.ok(missingQuality._validationErrors.some(e=>e.includes('quality object missing')));
+  draft.scenes[0].narration='';
+  assert.equal(validatePartial({},draft)._scriptValid,false);
+});
+
+test('repair loop carries its latest failed script without re-reading validation run zero', {skip:skipReason}, () => {
+  const original=draftFixture(),latest=draftFixture();latest.title='Latest repair';latest.scenes[0].narration+=' updated';
+  const state={scriptAttempts:{contract:{attempt:0}}};
+  const result=new Function('$input','$execution','$getWorkflowStaticData',code('Increment Script Attempt'))({first:()=>({json:{_failedScript:latest,_validationErrors:['repair requested']}})},{id:'contract'},()=>state).json;
+  assert.deepEqual(result._failedScript,latest);
+  const recovered=validatePartial({},original,state);
+  assert.equal(recovered.title,latest.title);
+  assert.equal(recovered.scenes[0].narration,latest.scenes[0].narration);
+  const lookup=name=> {
+    assert.notEqual(name,'Validate Final Script');
+    return {item:{json:{}},first:()=>({json:{}})};
+  };
+  const payload=JSON.parse(evalExpression(body('Claude: Repair Script'),result,lookup));
+  assert.ok(payload.messages[0].content.includes('Latest repair'));
+});
+
+test('history can execute immediately after capture, before merge exists', {skip:skipReason}, () => {
+  const lookup=name=> {assert.equal(name,'Extract Generated Topic');return {first:()=>({json:{topic:'Topic'}})};};
+  const payload=JSON.parse(evalExpression(body('Save Topic to History'),{script_snapshot:{hook:'Accepted hook'}},lookup));
+  assert.equal(payload.hook,'Accepted hook');
+});
+
+test('TTS and upload metadata use accepted values when rejected validator reads are unavailable', {skip:skipReason}, () => {
+  const accepted=draftFixture();
+  const lookup=name=> {
+    assert.notEqual(name,'Validate Final Script','no ambiguous validator reads');
+    assert.ok(['Capture Accepted Script','Merge By scene_index (not position)','YouTube: Upload Draft'].includes(name));
+    return {first:()=>({json:{script_snapshot:accepted,publication_description:'Accepted description',id:'video-id'}})};
+  };
+  const tts=JSON.parse(evalExpression(body('ElevenLabs: TTS+Timestamps'),{narration:'Scene narration'},lookup));
+  assert.equal(tts.voice_settings.speed,1.05);
+  const upload=node('YouTube: Upload Draft').parameters;
+  assert.equal(evalExpression(upload.title,{},lookup),'Accepted title');
+  assert.equal(evalExpression(upload.options.tags,{},lookup),'a,b,c,d,e');
+  for(const name of ['Disclose AI-Generated Content','Post First Comment']) assert.doesNotThrow(()=>JSON.parse(evalExpression(body(name),{id:'video-id'},lookup)));
 });

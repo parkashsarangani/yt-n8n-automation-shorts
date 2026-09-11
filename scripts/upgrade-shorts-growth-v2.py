@@ -353,6 +353,43 @@ def patch_merge_script_passthrough(w: dict) -> None:
     merge["parameters"]["jsCode"] = code
 
 
+def patch_remaining_script_references(w: dict) -> None:
+    """Use the single accepted run, and carry repair input through the loop."""
+    def rewrite(value, replacements):
+        if isinstance(value, str):
+            for old, new in replacements:
+                value = value.replace(old, new)
+            return value
+        if isinstance(value, dict):
+            return {key: rewrite(item, replacements) for key, item in value.items()}
+        if isinstance(value, list):
+            return [rewrite(item, replacements) for item in value]
+        return value
+
+    capture = "$('Capture Accepted Script').first().json.script_snapshot"
+    merged = "$('Merge By scene_index (not position)').first().json.script_snapshot"
+    for name in ('ElevenLabs: TTS+Timestamps', 'Resolve B-roll', 'YouTube: Upload Draft', 'Disclose AI-Generated Content', 'Post First Comment'):
+        node = node_by_name(w, name)
+        source = capture if name in ('ElevenLabs: TTS+Timestamps', 'Resolve B-roll') else merged
+        replacements = [("$('Validate Final Script').item.json", source), ("$('Validate Final Script').first().json", source)]
+        if source == merged:
+            replacements += [("$('Merge By scene_index (not position)').item.json", "$('Merge By scene_index (not position)').first().json"), ("$('YouTube: Upload Draft').item.json", "$('YouTube: Upload Draft').first().json")]
+        node['parameters'] = rewrite(node['parameters'], replacements)
+
+    # This side branch runs at capture time, before the merge exists.
+    history = node_by_name(w, 'Save Topic to History')
+    history['parameters'] = rewrite(history['parameters'], [(merged, '$json.script_snapshot'), ("$('Extract Generated Topic').item.json", "$('Extract Generated Topic').first().json")])
+
+    increment = node_by_name(w, 'Increment Script Attempt')
+    code = increment['parameters']['jsCode']
+    anchor = 'return {json:{scriptAttempt:newAttempt,lastErrors:errors}};'
+    if anchor not in code:
+        raise ValueError('repair handoff anchor missing')
+    increment['parameters']['jsCode'] = code.replace(anchor, "state.repairScript=$input.first().json._failedScript;\nreturn {json:{scriptAttempt:newAttempt,lastErrors:errors,_failedScript:state.repairScript}};", 1)
+    repair = node_by_name(w, 'Claude: Repair Script')
+    repair['parameters'] = rewrite(repair['parameters'], [("$('Validate Final Script').item.json._failedScript", '$json._failedScript'), ("$('Validate Final Script').item.json._validationErrors", '$json.lastErrors')])
+
+
 def patch_compose_payload_and_logging(w: dict) -> None:
     start_compose = node_by_name(w, "Start Compose Job")
     start_compose["parameters"]["jsonBody"] = "={{ JSON.stringify({ ...$json, policy_version: $json.policy_version || 'shorts-growth-v2', outro_experiment_arm: $json.outro_experiment_arm || 'no_outro', outro_line: $json.outro_line ?? null }) }}"
@@ -480,6 +517,7 @@ def upgrade(w: dict) -> dict:
     patch_accepted_script_capture(w)
     patch_merge_script_passthrough(w)
     patch_compose_payload_and_logging(w)
+    patch_remaining_script_references(w)
     patch_measurement_workflow(w)
     w.setdefault("meta", {})["shorts_growth_policy"] = POLICY_VERSION
     return w

@@ -53,6 +53,12 @@ def assert_growth_workflow(workflow: dict) -> None:
         if marker not in writer_body:
             raise RuntimeError(f"generated writer lost growth rule: {marker}")
 
+    for name in ('ElevenLabs: TTS+Timestamps', 'Resolve B-roll', 'YouTube: Upload Draft', 'Disclose AI-Generated Content', 'Post First Comment', 'Claude: Repair Script'):
+        if "$('Validate Final Script')" in json.dumps(node_by_name(workflow, name)['parameters']):
+            raise RuntimeError(f'{name} still reads the multi-run validator')
+    if "$('Merge By scene_index (not position)')" in json.dumps(node_by_name(workflow, 'Save Topic to History')['parameters']):
+        raise RuntimeError('topic history reads merge before it executes')
+
     validator_code = str(node_by_name(workflow, "Validate Final Script").get("parameters", {}).get("jsCode", ""))
     for marker in ("outro_experiment_arm", "current_outro", "no_outro", "policy_version='shorts-growth-v2'", "length_exception_reason is required"):
         if marker not in validator_code:
