@@ -106,13 +106,52 @@ def patch_final_parser(workflow: dict) -> None:
     # reaches it - a thrown error is fatal). Hand the upstream draft to the
     # existing repair path instead so a single bad LLM response costs one
     # attempt, not the day's upload.
-    new_invalid = (
-        "if (!parsed || typeof parsed.hook !== 'string' || !Array.isArray(parsed.scenes)) {\n"
-        "  let _vdDraft;\n"
-        "  try { _vdDraft = $('Parse Draft JSON').item.json.draft; } catch (e) { _vdDraft = undefined; }\n"
-        "  return { json: { _scriptValid: false, _validationErrors: ['visual director returned an incomplete script JSON object (finish_reason: ' + (choice && choice.finish_reason || 'unknown') + ') - rebuild the complete script, including every visual field, from the draft'], _failedScript: _vdDraft || parsed || {} } };\n"
-        "}"
-    )
+    # VISUAL_DIRECTOR_RECOVERY: the Visual Director is only supposed to ADD
+    # visual fields to the draft, but it repeatedly returns just those fields
+    # with no hook/scenes, and the repair pass uses the same prompt so it fails
+    # the same way - execution 809 burned all three attempts on it.
+    #
+    # The draft already holds the authoritative content, so overlay whatever the
+    # director did return instead of discarding the run. Narration, scene_index
+    # and point stay from the draft; visual fields come from the director.
+    new_invalid = r"""
+// Recover only incomplete structured output. Never fabricate narration or scores.
+function usableDraft(value) {
+  return value && typeof value.hook === 'string' && value.hook.trim() &&
+    Array.isArray(value.scenes) && value.scenes.length &&
+    value.scenes.every(s => s && typeof s.narration === 'string' && s.narration.trim());
+}
+if (!usableDraft(parsed)) {
+  let _vdDraft;
+  try {
+    const state = $getWorkflowStaticData('global').scriptAttempts?.[String($execution.id)];
+    _vdDraft = state?.repairScript;
+    if (!_vdDraft) _vdDraft = $('Parse Draft JSON').first().json.draft;
+  } catch (e) { _vdDraft = undefined; }
+  const partial = parsed && typeof parsed === 'object' ? parsed : {};
+  if (usableDraft(_vdDraft)) {
+    const visualKeys = ['visual_source','visual_type','visual_prompt','negative_prompt','stock_search_query','search_queries','named_subject','visual_role','visual_claim','global_subject','required_entities','required_actions','required_relationships','forbidden_visuals','acceptable_visuals','visual_proof_mode','visual_mode','must_show','acceptable_substitutes','source_priority','template_name','template_data','template_fallback'];
+    const topKeys = ['creative_format','visual_grammar','first_frame_type','visual_plan_quality','caption_mode','transition_style','quality','quality_route'];
+    const overlay = (base, patch, keys) => {
+      const result = {...base};
+      for (const key of keys) if (patch[key] !== undefined) result[key] = patch[key];
+      return result;
+    };
+    const patches = Array.isArray(partial.scenes) ? partial.scenes : [];
+    parsed = overlay(_vdDraft, partial, topKeys);
+    parsed.scenes = _vdDraft.scenes.map((scene, i) => {
+      // An explicit index never falls back onto a different scene by position.
+      const indexed = patches.filter(v => v && v.scene_index != null && String(v.scene_index).trim() !== '' && Number(v.scene_index) === Number(scene.scene_index));
+      const positional = patches[i];
+      const patch = indexed.length === 1 ? indexed[0] : indexed.length === 0 && positional && positional.scene_index == null ? positional : {};
+      return overlay(scene, patch, visualKeys);
+    });
+    parsed.visual_director_recovered = true;
+  } else {
+    return {json:{_scriptValid:false,_validationErrors:['visual director returned an incomplete script and no usable draft was available'],_failedScript:_vdDraft || partial}};
+  }
+}
+"""
     node["parameters"]["jsCode"] = replace_required(code, old_invalid, new_invalid, "final complete-script guard")
 
 
