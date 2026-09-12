@@ -237,7 +237,7 @@ test('deep metrics attach to the newest frozen cohort, never a new bucket', asyn
   const perfPath = path.join(dir, 'performance_history.json');
 
   fs.writeFileSync(perfPath, JSON.stringify([
-    { video_id: 'vid1', published_at: '2026-09-01T00:00:00Z', snapshots: { t6h: { views: 10 }, t24h: { views: 40 } } },
+    { video_id: 'vid1', published_at: '2026-09-01T00:00:00Z', snapshots: { t6h: { views: 10 }, t24h: { views: 40, measured_at: '2026-09-02T01:55:00Z' } } },
   ]));
 
   const result = await fb.ingestDeepMetrics({
@@ -256,7 +256,7 @@ test('deep metrics attach to the newest frozen cohort, never a new bucket', asyn
   });
 
   assert.equal(result.updated, 1);
-  assert.equal(result.attached.vid1, 't24h', 'must attach to the newest frozen cohort');
+  assert.equal(result.attached.vid1, 't24h', 'must attach within the same measurement pass');
   const saved = JSON.parse(fs.readFileSync(perfPath, 'utf8'));
   assert.ok(saved[0].snapshots.t24h.retention, 'retention lands on the t24h cohort');
   assert.equal(saved[0].snapshots.t6h.retention, undefined, 't6h must stay frozen as measured');

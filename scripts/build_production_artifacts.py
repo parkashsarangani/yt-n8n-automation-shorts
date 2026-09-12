@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 import build_production_artifacts_v5 as v5
+import retention_workflow
 
 BUILD_VERSION = "5"
 POLICY_VERSION = "shorts-growth-v2"
@@ -130,6 +131,8 @@ def build(root: Path, output: Path) -> dict:
     # Growth adds /topic-dedup afterward, so internalize once more to preserve
     # the production Docker-network transport invariant.
     workflow = json.loads(workflow_out.read_text())
+    compose_out.write_text(retention_workflow.upgrade(workflow, compose_out.read_text(), root))
+    retention_workflow.assert_applied(workflow, compose_out.read_text())
     v5.internalize_compose_service_urls(workflow)
     workflow.setdefault("meta", {})["production_build_version"] = BUILD_VERSION
     workflow["meta"]["shorts_growth_policy"] = POLICY_VERSION
