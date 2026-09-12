@@ -11,6 +11,7 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 const axios = require("axios");
+const retentionPolicy = require("./retentionPolicy");
 
 const DATA_DIR = path.dirname(process.env.TOPIC_HISTORY_PATH || "/app/data/topic_history.json");
 const PERF_PATH = path.join(DATA_DIR, "performance_history.json");
@@ -44,7 +45,7 @@ async function writeJson(p, data) {
 }
 
 function numOrNull(v) {
-  if (v === null || v === undefined || v === "") return null;
+  if (v == null || typeof v === "boolean" || String(v).trim() === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -57,13 +58,16 @@ function boolOrNull(v) {
 function safeRate(numerator, denominator) {
   const n = numOrNull(numerator);
   const d = numOrNull(denominator);
-  if (n === null || d === null || d <= 0) return null;
+  if (n === null || n < 0 || d === null || d <= 0) return null;
   return n / d;
 }
 
 function normalizeCreativeDna(entry = {}) {
   const dna = entry.creative_dna && typeof entry.creative_dna === "object" ? entry.creative_dna : entry;
   return {
+    retention_experiment: dna.retention_experiment || null,
+    retention_diagnostics: dna.retention_diagnostics || null,
+    rendered_timing: dna.rendered_timing || null,
     policy_version: dna.policy_version || entry.policy_version || POLICY_VERSION,
     topic_strategy_arm: dna.topic_strategy_arm || entry.topic_strategy_arm || null,
     topic_predicted_score: numOrNull(dna.topic_predicted_score ?? entry.topic_predicted_score),
@@ -140,21 +144,32 @@ function parseAnalytics(body) {
     if (!id) continue;
     const m = {};
     headers.forEach((name, i) => { if (name !== "video") m[name] = row[i]; });
-    const views = Math.round(m.views || 0);
-    const engagedViews = m.engagedViews == null ? null : Math.round(m.engagedViews || 0);
-    const likes = Math.round(m.likes || 0);
-    const comments = Math.round(m.comments || 0);
-    const shares = Math.round(m.shares || 0);
-    const subscribersGained = Math.round(m.subscribersGained || 0);
-    const pct = (v) => (v == null ? null : (v > 1 ? v / 100 : v));
+    const count = value => { const n=numOrNull(value); return n !== null && n>=0 ? Math.round(n) : null; };
+    const views = count(m.views);
+    const engagedViews = count(m.engagedViews);
+    const likes = count(m.likes);
+    const comments = count(m.comments);
+    const shares = count(m.shares);
+    const subscribersGained = count(m.subscribersGained);
+    // YouTube's API field is a percentage, including values below 1 percent.
+    const pct = value => { const n=numOrNull(value); return n===null ? null : n/100; };
     const satisfactionDenominator = engagedViews != null && engagedViews > 0 ? engagedViews : null;
 
     out[id] = {
       views,
       engaged_views: engagedViews,
       engaged_view_rate: safeRate(engagedViews, views),
-      average_view_percentage: m.averageViewPercentage != null ? Number(m.averageViewPercentage) : null,
-      average_view_duration_sec: m.averageViewDuration != null ? Number(m.averageViewDuration) : null,
+      engaged_view_rate_definition: 'Engaged views / public starts; not Studio stayed-to-watch.',
+      // No documented stayed-to-watch field in this Analytics query. Keep it
+      // unavailable rather than inventing a value from a different denominator.
+      stayed_to_watch_pct: null,
+      stayed_to_watch_source: 'unavailable_in_analytics_query',
+      like_rate: safeRate(likes, views),
+      share_rate: safeRate(shares, views),
+      comment_rate: safeRate(comments, views),
+      subscriber_rate: safeRate(subscribersGained, views),
+      average_view_percentage: numOrNull(m.averageViewPercentage),
+      average_view_duration_sec: numOrNull(m.averageViewDuration),
       subscribers_gained: subscribersGained,
       likes,
       comments,
@@ -166,13 +181,14 @@ function parseAnalytics(body) {
       impressions: m.videoThumbnailImpressions != null ? Math.round(m.videoThumbnailImpressions) : null,
       click_through_rate: pct(m.videoThumbnailImpressionsClickRate),
       subscribers_lost: m.subscribersLost == null ? null : Math.round(m.subscribersLost),
-      net_subscribers: m.subscribersLost == null ? subscribersGained : subscribersGained - Math.round(m.subscribersLost),
+      net_subscribers: subscribersGained === null || count(m.subscribersLost) === null ? null : subscribersGained - count(m.subscribersLost),
       dislikes: m.dislikes == null ? null : Math.round(m.dislikes),
       minutes_watched: m.estimatedMinutesWatched == null ? null : Number(m.estimatedMinutesWatched),
       // A Short that is genuinely liked returns a positive ratio; heavy dislikes
       // suppress distribution far more than a low like count does.
       like_ratio: m.dislikes == null ? null : safeRate(likes, likes + Math.round(m.dislikes)),
     };
+    out[id].diagnostics = retentionPolicy.diagnoseMetrics(out[id]);
   }
   return out;
 }
@@ -278,6 +294,9 @@ function captureDueSnapshots(entry, metrics, measuredAt) {
     if (age < target.hours || age > target.hours + target.maxLagHours) continue;
     entry.snapshots[target.key] = {
       ...metrics,
+      metric_period: "cumulative_since_publication",
+      mature_at: new Date(new Date(entry.published_at).getTime()+target.hours*3600000).toISOString(),
+      view_count_at_snapshot: metrics.views ?? null,
       target_age_hours: target.hours,
       observed_age_hours: Number(age.toFixed(2)),
       measured_at: measuredAt,
@@ -310,6 +329,7 @@ function selectStrategistCohort(history) {
     trigger: h.trigger,
     creative_dna: h.creative_dna || {},
     metrics: h.snapshots[key],
+    analysis_eligibility: {hold:Number(h.snapshots[key].engaged_views)>=100, satisfaction:Number(h.snapshots[key].views)>=500},
   }));
   return { key, count: rows.length, counts, rows };
 }
@@ -324,18 +344,22 @@ MEASURED VIDEOS (creative DNA + outcomes):
 ${perfJson}
 
 MEASUREMENT MODEL - follow this order:
-1. HOOK / SCROLL-STOP is primary: engaged_view_rate = engaged_views / public views. It estimates how many starts survived the opening. Optimize the first frame, hook wording, topic promise and first seconds against this first.
+1. HOOK / SCROLL-STOP: use stayed_to_watch_pct only when explicitly available with its source. engaged_view_rate = engaged_views / public views is a starts-to-engagement proxy, NOT Studio stayed-to-watch; replays and traffic mix affect the denominator. Do not label the proxy swipe-away rate or use Studio thresholds on it.
 2. HOLD is second: average_view_percentage and average_view_duration_sec describe what happened after a viewer became engaged. A high hold metric cannot rescue a weak scroll-stop rate.
 3. SATISFACTION is third: compare shares_per_engaged_view, comments_per_engaged_view, likes_per_engaged_view and subscribers_per_engaged_view. Prefer rates over raw counts.
-4. views is a distribution/outcome metric, not the creative-quality objective by itself. This channel is currently capped near ~1000 views per Short, which is the size of YouTube's initial test audience: passing that gate is decided by the satisfaction and retention signals above, not by anything that raises views directly. Treat a cluster of Shorts at roughly the same view count as censored data, not as a quality ranking.
+4. views is a distribution outcome. A cluster near 1000 views does NOT prove a fixed test bucket, a cap, or a second-push gate. This dataset cannot identify why recommendations stopped. Do not invent algorithm thresholds or infer causality from a plateau.
 5. When metrics.retention is present, use it before any averaged number, because a Short is won or lost in its opening seconds:
    - hook_survival is the fraction of the opening audience still watching a tenth of the way in. This is the sharpest available read on the hook.
    - steepest_drop_from_ratio / steepest_drop_to_ratio locate exactly where viewers leave. Map that back to what happens at that point in the script (hook, mid-beat, payoff, outro) and make the recommendation about that specific beat.
-   - relative_retention_avg is YouTube's own comparison against similar videos; above 0.5 is better than typical, below 0.5 is worse. It is the closest direct read on why distribution stalls.
-6. When metrics.traffic is present, check shorts_feed_share before blaming the creative. A Short with a low shorts_feed_share was barely served to the feed at all, so its low view count is a distribution outcome and says little about the hook; one with a high shorts_feed_share and weak retention IS a creative problem.
+   - relative_retention_avg is YouTube's own comparison against similar videos; above 0.5 is better than typical, below 0.5 is worse. It is a comparative retention measure, not proof of the reason distribution changed.
+6. When metrics.traffic is present, check shorts_feed_share before blaming the creative. Traffic shares describe the mix of views, not how often the feed showed a Short. They do not prove either limited exposure or a creative defect without further evidence.
 7. Thumbnail impressions/CTR are secondary for Shorts-feed learning and should only be mentioned when non-null and materially informative.
 
 DISCIPLINE:
+- Distinguish subscribers_gained, subscribers_lost and net_subscribers. Missing values are unknown, never zero. APV >100% is possible with rewatching; retain the value and flag small samples rather than declaring corruption or a winner.
+- Only compare hold/retention for videos with at least 100 engaged_views. Keep small-sample rows visible as insufficient evidence. For satisfaction rates require at least 500 public views. These are internal analysis sample rules, not YouTube eligibility rules.
+- retention_diagnostics contains planning warnings, not observations of the rendered frames. rendered_timing contains measured scene boundaries, not the spoken instant at which a payoff occurs.
+- Hook experiment comparisons are intention-to-treat, within policy, outro arm, caption/voice style and the same cohort. Require ten videos per arm before a review, and report assignment mismatches. Do not simultaneously change duration, voice and first-frame treatment to chase one winner.
 - Fewer than ~8 videos in this cohort: make only small claims. With zero, return no guidance.
 - Any comparison between creative choices requires at least 2 videos in EACH group; prefer 3+.
 - Never infer causality from one winner. Say "associated with" unless repeated evidence is clear.
@@ -417,6 +441,7 @@ async function runStrategist(history) {
   const end = text.lastIndexOf("}");
   if (start < 0 || end < 0) throw new Error("strategist returned no JSON: " + text.slice(0, 200));
   const insights = JSON.parse(text.slice(start, end + 1));
+  insights.measurement_policy = retentionPolicy.RETENTION_POLICY;
   insights.generated_at = new Date().toISOString();
   insights.measured_count = cohort.count;
   insights.cohort = cohort.key;
@@ -496,33 +521,44 @@ async function ingestDeepMetrics(body) {
     const deep = { retention, traffic, measured_at: measuredAt };
     h.latest_deep_metrics = deep;
 
-    // Prefer the newest cohort this video already has, so the curve lands on a
-    // like-for-like measurement instead of creating an unaged bucket.
-    const snapshots = h.snapshots && typeof h.snapshots === "object" ? h.snapshots : null;
-    const target = snapshots
-      ? [...SNAPSHOT_TARGETS].reverse().find((t) => snapshots[t.key])
-      : null;
-    if (target) {
-      snapshots[target.key].retention = retention;
-      snapshots[target.key].traffic = traffic;
-      attached[h.video_id] = target.key;
-    }
+    const key = attachDeepSnapshot(h, deep);
+    if (key) attached[h.video_id] = key;
     updated++;
   }
   await writeJson(PERF_PATH, hist);
   return { updated, attached, measured_at: measuredAt };
 }
 
+// Deep reports may arrive a little after batch metrics. They may only fill
+// missing fields in that same measurement pass, never refresh an old cohort.
+function attachDeepSnapshot(entry, deep) {
+  const measured = new Date(deep.measured_at).getTime();
+  if (!Number.isFinite(measured)) return null;
+  for (const target of [...SNAPSHOT_TARGETS].reverse()) {
+    const snap = entry.snapshots?.[target.key];
+    if (!snap) continue;
+    const lag = measured - new Date(snap.measured_at).getTime();
+    const age = ageHours(entry.published_at, deep.measured_at);
+    if (!Number.isFinite(lag) || lag < 0 || lag > 30*60*1000 || age===null || age>target.hours+target.maxLagHours) continue;
+    let changed=false;
+    for (const field of ['retention','traffic']) {
+      if (deep[field] && snap[field] == null) { snap[field]=deep[field]; snap[field+'_measured_at']=deep.measured_at; changed=true; }
+    }
+    return changed ? target.key : null;
+  }
+  return null;
+}
+
 async function getInsights() {
-  return await readJson(INSIGHTS_PATH, {
-    sample_size: 0,
-    cohort: null,
-    confidence_note: "No like-for-like cohort snapshots are mature yet.",
-    guidance: [],
-    avoid: [],
-    experiments: [],
-    policy_version: POLICY_VERSION,
-  });
+  let insights = await readJson(INSIGHTS_PATH, {});
+  // A saved strategist answer from the old measurement model can contain the
+  // unsupported fixed-test-bucket assertion. Do not re-inject it into writers.
+  if (insights.measurement_policy !== retentionPolicy.RETENTION_POLICY) {
+    insights = {sample_size:0,cohort:null,guidance:[],avoid:[],experiments:[],confidence_note:'Waiting for guidance generated under corrected metric definitions.'};
+  }
+  const history = await readJson(PERF_PATH, []);
+  return {...insights, measurement_policy:retentionPolicy.RETENTION_POLICY,
+    hook_experiment:retentionPolicy.experimentReport(history)};
 }
 
 async function getMeasureIds({ maxDays = 60, limit = 200 } = {}) {
@@ -552,6 +588,8 @@ module.exports = {
   logPublished,
   ingestAnalytics,
   ingestDeepMetrics,
+  attachDeepSnapshot,
+  STRATEGIST_PROMPT,
   summarizeRetention,
   summarizeTrafficSources,
   getInsights,

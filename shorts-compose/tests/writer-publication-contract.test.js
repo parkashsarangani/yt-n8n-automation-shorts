@@ -175,3 +175,34 @@ test('compose body is a bare $json reference, never a spread+stringify reconstru
   const startCompose = body('Start Compose Job');
   assert.equal(startCompose.trim(), "={{ $json }}", 'Start Compose Job must not reconstruct its body inside the expression');
 });
+
+test('retention assignment reaches writer and accepted-script publication telemetry', {skip:skipReason},()=>{
+  const planner = node('Plan Retention Experiment');
+  assert.ok(planner);
+  const plan = new Function('$input','$execution',planner.parameters.jsCode)({first:()=>({json:{research:'evidence'}})},{id:'retention-contract'}).json;
+  assert.equal(plan.research,'evidence');
+  const lookup=name=>({first:()=>({json:plan}),item:{json:{topic:'A concrete subject',topics:[],pool:[],shortlist:[]}}});
+  for (const name of ['Claude: Draft Script (Stage 1)','Claude: Visual Director','Claude: Repair Script']) {
+    const payload=JSON.parse(evalExpression(body(name),{draft:draftFixture(),_failedScript:draftFixture(),lastErrors:[]},lookup));
+    assert.ok(payload.messages.some(m=>String(m.content).includes(plan.retention_experiment.arm)));
+  }
+  for (const name of ['Claude: Generate Topic','Claude: Commission Topic Shortlist']) {
+    const payload=JSON.parse(evalExpression(body(name),{shortlist:[]},lookup));
+    assert.ok(payload.messages.some(m=>String(m.content).includes('RETENTION_EXPERIMENT_V1 TOPIC PRIORITY')));
+    assert.ok(!body(name).includes('Plan Retention Experiment'), 'topic selection precedes assignment');
+  }
+  const accepted = new Function('$input','$','$execution','$getWorkflowStaticData',code('Validate Final Script'))(
+    {first:()=>({json:wrapped(draftFixture())})},
+    name=> name==='Plan Retention Experiment' ? {first:()=>({json:plan})} : {first:()=>({json:{draft:draftFixture()}}),item:{json:{topic:'',draft:draftFixture()}}},
+    {id:'retention-contract'},()=>({})).json;
+  assert.equal(accepted._scriptValid,true,JSON.stringify(accepted._validationErrors));
+  assert.deepEqual(accepted.retention_experiment,plan.retention_experiment);
+  const rendered={status:'measured_scene_boundaries',payoff_scene_start_sec:18};
+  const logLookup=name=>({first:()=>({json:name==='Merge By scene_index (not position)' ? {script_snapshot:accepted,data:[]} : name==='Validate Compose Result' ? {rendered_timing:rendered,duration_sec:30} : {id:'published-id'}})});
+  const logged=JSON.parse(evalExpression(body('Log Published Video'),{},logLookup));
+  assert.deepEqual(logged.creative_dna.retention_experiment,plan.retention_experiment);
+  assert.deepEqual(logged.creative_dna.rendered_timing,rendered);
+  const normalized=require('../feedbackLoop').normalizeCreativeDna(logged);
+  assert.deepEqual(normalized.retention_experiment,plan.retention_experiment);
+  assert.deepEqual(normalized.rendered_timing,rendered);
+});
