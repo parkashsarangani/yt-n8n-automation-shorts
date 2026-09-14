@@ -45,7 +45,9 @@ def patch_topic_policy(w: dict) -> None:
         "(c) a famous action explained by surprising physics, (d) an instantly understood scale contradiction. "
         "ADJACENT keeps a proven curiosity mechanism but moves to a materially different subject. EXPLORE tries a genuinely new viewing mechanism. "
         "Every candidate MUST include strategy_arm='exploit'|'adjacent'|'explore', subject_key, mechanism_key, payoff_key, and canonical_key='subject|mechanism|payoff'. "
-        "These keys describe the underlying FACT, not its wording, so paraphrases retain the same identity. The exact 7/2/1 allocation is mandatory.\\n\\n"
+        "These keys describe the underlying FACT, not its wording, so paraphrases retain the same identity. The exact 7/2/1 allocation is mandatory. "
+        "HARD DUPLICATE CHECK: before answering, compare each of your 10 candidates against the already-used list below sentence-by-sentence. "
+        "An exact repeat or a trivial reword of an already-used topic (same subject AND same underlying fact) is a zero-value candidate, not a valid exploit pick - discard it and generate a genuinely different one instead of submitting it.\\n\\n"
         + anchor
     )
     if f"{MARKER} TOPIC ALLOCATION" not in body:
@@ -136,6 +138,162 @@ pool=pool.map((c,i)=>({...c,strategy_arm:['exploit','adjacent','explore'].includ
 
     backlog = node_by_name(w, "Log Topic Backlog")
     backlog["parameters"]["jsonBody"] = "={{ JSON.stringify({ candidates: $json.candidates, picked: $json.topic, picked_score: $json.score, strategy_arm: $json.strategy_arm || null, canonical_key: $json.canonical_key || null, policy_version: 'shorts-growth-v2' }) }}"
+
+
+DEDUP_RETRY_MARKER = "TOPIC_DEDUP_RETRY"
+TOPIC_INIT_NODE = "Init Topic Attempt Counter"
+DEDUP_IF_NODE = "If Topic Pool Exhausted"
+DEDUP_INCREMENT_NODE = "Increment Topic Attempt"
+DEDUP_RETRY_IF_NODE = "If Topic Attempts Exhausted"
+DEDUP_FAIL_NODE = "Fail: Topic Pool Exhausted"
+MAX_TOPIC_DEDUP_RETRIES = 1
+
+
+def patch_topic_dedup_retry(w: dict) -> None:
+    """Regenerate once instead of dying when every topic candidate is a duplicate.
+
+    Execution 838 lost a whole scheduled run because all 10 candidates from
+    "Claude: Generate Topic" matched already-published Shorts exactly
+    (TOPIC_DEDUP_EXHAUSTED). "Deduplicate Topic Pool" has no error branch, so
+    the 409 just threw and killed the run - a single bad LLM batch should not
+    cost a publish slot when a second attempt, fed the exact rejected topics,
+    is cheap and likely to succeed. Bounded to one retry (via workflow static
+    data keyed by execution id, the same pattern already used for the script
+    repair loop) so a persistently exhausted history fails loudly instead of
+    looping forever.
+    """
+    gen = node_by_name(w, "Claude: Generate Topic")
+    body = str(gen["parameters"]["jsonBody"])
+    if DEDUP_RETRY_MARKER not in body:
+        old = "JSON.stringify($('Ensure Topics Array').item.json.topics.map(t => t.topic))"
+        new = (
+            old
+            + ' + ($json._topicRetryAvoid && $json._topicRetryAvoid.length ? (" - '
+            + DEDUP_RETRY_MARKER
+            + ": every candidate in your previous batch of 10 matched an already-published Short and was rejected by the duplicate gate. "
+            'Every one of these exact topics, and any close paraphrase of them, is FORBIDDEN this attempt: " '
+            "+ JSON.stringify($json._topicRetryAvoid) + \". Choose genuinely different subjects and mechanisms.\") : \"\")"
+        )
+        if old not in body:
+            raise ValueError("topic retry-feedback anchor missing")
+        body = body.replace(old, new, 1)
+    gen["parameters"]["jsonBody"] = body
+
+    dedup = node_by_name(w, DEDUP_NODE)
+    dedup["onError"] = "continueRegularOutput"
+
+    names = {n.get("name") for n in w.get("nodes", [])}
+    if TOPIC_INIT_NODE not in names:
+        w["nodes"].append({
+            "id": "d3f4a1e2-6b9c-4a17-9e3d-topicdeduprty1",
+            "name": TOPIC_INIT_NODE,
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [1650, 300],
+            "parameters": {"jsCode": (
+                f"// {DEDUP_RETRY_MARKER} WORKFLOW_GLOBAL_STATIC_STATE: execution-scoped topic-dedup retry state shared across workflow nodes.\n"
+                "const staticData=$getWorkflowStaticData('global');\n"
+                "const runId=String($execution.id||'unknown');\n"
+                "staticData.topicDedupAttempts=staticData.topicDedupAttempts||{};\n"
+                "const now=Date.now();\n"
+                "for(const [key,value] of Object.entries(staticData.topicDedupAttempts)){if(!value||now-Number(value.updatedAt||0)>21600000)delete staticData.topicDedupAttempts[key];}\n"
+                "staticData.topicDedupAttempts[runId]={attempt:0,updatedAt:now};\n"
+                "return $input.all();"
+            )},
+        })
+    if DEDUP_IF_NODE not in names:
+        w["nodes"].append({
+            "id": "e4a5b2f3-7c0d-4b28-8f4e-topicdeduprty2",
+            "name": DEDUP_IF_NODE,
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [2800, 300],
+            "parameters": {
+                "conditions": {
+                    "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "strict", "version": 1},
+                    "conditions": [{
+                        "leftValue": "={{ $json.success }}",
+                        "rightValue": False,
+                        "operator": {"type": "boolean", "operation": "true", "singleValue": False},
+                    }],
+                    "combinator": "and",
+                },
+                "options": {},
+            },
+        })
+    if DEDUP_INCREMENT_NODE not in names:
+        w["nodes"].append({
+            "id": "f5b6c3a4-8d1e-4c39-9a5f-topicdeduprty3",
+            "name": DEDUP_INCREMENT_NODE,
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [3050, 460],
+            "parameters": {"jsCode": (
+                f"// {DEDUP_RETRY_MARKER} WORKFLOW_GLOBAL_STATIC_STATE: shared workflow state, isolated by execution id.\n"
+                "const staticData=$getWorkflowStaticData('global');\n"
+                "const runId=String($execution.id||'unknown');\n"
+                "staticData.topicDedupAttempts=staticData.topicDedupAttempts||{};\n"
+                "const state=staticData.topicDedupAttempts[runId]||{attempt:0,updatedAt:Date.now()};\n"
+                "const newAttempt=Number(state.attempt||0)+1;\n"
+                "state.attempt=newAttempt;state.updatedAt=Date.now();staticData.topicDedupAttempts[runId]=state;\n"
+                "const failure=$input.first().json||{};\n"
+                "const rejected=failure.details||failure.error?.details||[];\n"
+                "const avoid=rejected.map(r=>r.topic).filter(Boolean);\n"
+                "console.log(`Topic dedup exhausted on attempt ${newAttempt}: ${avoid.length} candidates rejected as duplicates`);\n"
+                "return {json:{topicDedupAttempt:newAttempt,_topicRetryAvoid:avoid}};"
+            )},
+        })
+    if DEDUP_RETRY_IF_NODE not in names:
+        w["nodes"].append({
+            "id": "a6c7d4b5-9e2f-4d4a-8b60-topicdeduprty4",
+            "name": DEDUP_RETRY_IF_NODE,
+            "type": "n8n-nodes-base.if",
+            "typeVersion": 2,
+            "position": [3300, 460],
+            "parameters": {
+                "conditions": {
+                    "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "strict", "version": 1},
+                    "conditions": [{
+                        "leftValue": "={{ $json.topicDedupAttempt }}",
+                        "rightValue": MAX_TOPIC_DEDUP_RETRIES,
+                        "operator": {"type": "number", "operation": "gt"},
+                    }],
+                    "combinator": "and",
+                },
+                "options": {},
+            },
+        })
+    if DEDUP_FAIL_NODE not in names:
+        w["nodes"].append({
+            "id": "b7d8e5c6-0f3a-4e5b-9c71-topicdeduprty5",
+            "name": DEDUP_FAIL_NODE,
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [3550, 600],
+            "parameters": {"jsCode": (
+                f"// {DEDUP_RETRY_MARKER} WORKFLOW_GLOBAL_STATIC_STATE: terminal retry-state cleanup.\n"
+                "const staticData=$getWorkflowStaticData('global');\n"
+                "const runId=String($execution.id||'unknown');\n"
+                "if(staticData.topicDedupAttempts)delete staticData.topicDedupAttempts[runId];\n"
+                "throw new Error('Topic generation exhausted the semantic no-repeat gate twice in a row "
+                "(every candidate matched an already-published Short) - giving up for this scheduled run "
+                "rather than forcing a duplicate topic through.');"
+            )},
+        })
+
+    con = w.setdefault("connections", {})
+    con["Ensure Topics Array"] = {"main": [[{"node": TOPIC_INIT_NODE, "type": "main", "index": 0}]]}
+    con[TOPIC_INIT_NODE] = {"main": [[{"node": "Init Script Attempt Counter", "type": "main", "index": 0}]]}
+    con[DEDUP_NODE] = {"main": [[{"node": DEDUP_IF_NODE, "type": "main", "index": 0}]]}
+    con[DEDUP_IF_NODE] = {"main": [
+        [{"node": DEDUP_INCREMENT_NODE, "type": "main", "index": 0}],
+        [{"node": "Claude: Commission Topic Shortlist", "type": "main", "index": 0}],
+    ]}
+    con[DEDUP_INCREMENT_NODE] = {"main": [[{"node": DEDUP_RETRY_IF_NODE, "type": "main", "index": 0}]]}
+    con[DEDUP_RETRY_IF_NODE] = {"main": [
+        [{"node": DEDUP_FAIL_NODE, "type": "main", "index": 0}],
+        [{"node": "Claude: Generate Topic", "type": "main", "index": 0}],
+    ]}
 
 
 def patch_writer_and_duration(w: dict) -> None:
@@ -527,6 +685,7 @@ def patch_mechanical_field_repair(w: dict) -> None:
 
 def upgrade(w: dict) -> dict:
     patch_topic_policy(w)
+    patch_topic_dedup_retry(w)
     patch_mechanical_field_repair(w)
     patch_writer_and_duration(w)
     patch_accepted_script_capture(w)
@@ -544,9 +703,14 @@ def assert_invariants(w: dict) -> None:
     if DEDUP_NODE not in {n.get("name") for n in w.get("nodes", [])}:
         raise RuntimeError("semantic topic dedup node missing")
     gen = str(node_by_name(w, "Claude: Generate Topic")["parameters"]["jsonBody"])
-    for marker in ("GENERATE 10 DISTINCT candidate topics", "7 exploit / 2 adjacent / 1 explore", "canonical_key"):
+    for marker in ("GENERATE 10 DISTINCT candidate topics", "7 exploit / 2 adjacent / 1 explore", "canonical_key", "HARD DUPLICATE CHECK", DEDUP_RETRY_MARKER):
         if marker not in gen:
             raise RuntimeError(f"topic policy prompt missing {marker}")
+    for name in (TOPIC_INIT_NODE, DEDUP_IF_NODE, DEDUP_INCREMENT_NODE, DEDUP_RETRY_IF_NODE, DEDUP_FAIL_NODE):
+        if name not in {n.get("name") for n in w.get("nodes", [])}:
+            raise RuntimeError(f"topic dedup retry loop missing node: {name}")
+    if node_by_name(w, DEDUP_NODE).get("onError") != "continueRegularOutput":
+        raise RuntimeError("topic dedup node no longer survives a rejection to allow the retry loop")
     writer = str(node_by_name(w, "Claude: Draft Script (Stage 1)")["parameters"]["jsonBody"])
     if "averaged 84 views" in writer or "3.5x fewer views" in writer:
         raise RuntimeError("stale fixed channel statistics survived writer prompt")
