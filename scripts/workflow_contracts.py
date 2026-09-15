@@ -31,18 +31,21 @@ BROLL_FIRST_FRAME_TARGET = 78
 BROLL_TEMPLATE_FALLBACK_THRESHOLD = 60
 
 EXPECTED_NODE_CONTRACTS = {
+    # 150s (not the gateway's 120s LLM_ROUTER_TIMEOUT_MS) so n8n's own
+    # client-side abort always has margin over the gateway's own worst-case
+    # free+direct-fallback budget - see TIMEOUT_MS in upgrade-topic-latency.py.
     "Claude: Generate Topic": {
-        "timeout": 120000,
+        "timeout": 150000,
         "single_attempt": True,
         "body_markers": ("TOPIC_LATENCY", "max_completion_tokens: 6000"),
     },
     "Claude: Commission Topic Shortlist": {
-        "timeout": 120000,
+        "timeout": 150000,
         "single_attempt": True,
         "body_markers": ("RELIABILITY_FIRST_VIDEO", "max_completion_tokens: 8192"),
     },
     "Claude: Draft Script (Stage 1)": {
-        "timeout": 120000,
+        "timeout": 150000,
         "single_attempt": True,
         "body_markers": ("QUALITY_ALIGNMENT WRITER",),
     },

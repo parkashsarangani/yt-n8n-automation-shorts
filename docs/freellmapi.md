@@ -86,7 +86,20 @@ FREELLMAPI_TEXT_MODEL=auto:smart
 FREELLMAPI_VISION_MODEL=auto:smart
 FREELLMAPI_BASE_URL=http://freellmapi:3001/v1
 LLM_ROUTER_TIMEOUT_MS=120000
+LLM_ROUTER_FREE_TIMEOUT_MS=45000
 ```
+
+`LLM_ROUTER_TIMEOUT_MS` is the overall budget the caller gets for a single
+gateway call (free attempt plus, on failure, a paid-direct fallback).
+`LLM_ROUTER_FREE_TIMEOUT_MS` caps how much of that budget the FreeLLMAPI leg
+alone may use. FreeLLMAPI's own `auto:smart` routing tries multiple upstream
+providers in series internally, and any one of them can individually run
+close to the full request timeout - without this cap, a single slow/stuck
+provider inside that chain could consume the whole budget before FreeLLMAPI
+even reached a working one, leaving zero time for the direct-provider
+fallback to run before the caller (n8n) gave up. The router now always
+reserves `overall - elapsed` (minimum 5s) for the fallback leg, so the total
+never exceeds `LLM_ROUTER_TIMEOUT_MS` regardless of how the free leg fails.
 
 `auto:smart` lets FreeLLMAPI choose among enabled free models. Vision requests
 are detected from OpenAI-compatible image content and can be routed separately

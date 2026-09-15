@@ -182,7 +182,7 @@ def patch_runtime_guardrails(workflow: dict) -> None:
     commissioner["retryOnFail"] = False
     commissioner["maxTries"] = 1
     commissioner["waitBetweenTries"] = 0
-    commissioner["parameters"].setdefault("options", {})["timeout"] = 120000
+    commissioner["parameters"].setdefault("options", {})["timeout"] = 150000
     commissioner["notes"] = RUNTIME_MARKER + ": single bounded commissioning call"
 
     visual = node_by_name(workflow, "Claude: Visual Director")
