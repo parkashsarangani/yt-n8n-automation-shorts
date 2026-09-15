@@ -67,6 +67,7 @@ services:
   shorts-compose:
     build: ./shorts-compose
     restart: unless-stopped
+    stop_grace_period: 35m
     ports:
       - "4000:4000"
     environment:
@@ -109,7 +110,7 @@ services:
       - BROLL_LOCAL_RERANK_MODEL=${BROLL_LOCAL_RERANK_MODEL:-Xenova/clip-vit-base-patch32}
       - BROLL_LOCAL_RERANK_CANDIDATES=${BROLL_LOCAL_RERANK_CANDIDATES:-20}
       - BROLL_LOCAL_RERANK_TIMEOUT_MS=${BROLL_LOCAL_RERANK_TIMEOUT_MS:-18000}
-      - HF_CACHE_DIR=${HF_CACHE_DIR:-/app/data/hf-cache}
+      - HF_CACHE_DIR=${HF_CACHE_DIR:-/app/.hf-cache}
 
       # V4 quality targets. These thresholds drive ranking, retries, early
       # acceptance and telemetry only. Missing the targets never makes a usable

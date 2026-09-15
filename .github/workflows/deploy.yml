@@ -3,7 +3,12 @@ name: Deploy to Production
 on:
   push:
     branches: [main]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      legacy_idle_confirmed:
+        description: 'First upgrade only: I paused Shorts generation and verified no render is running on the legacy service'
+        type: boolean
+        default: false
 
 concurrency:
   group: production-deploy
@@ -53,6 +58,7 @@ jobs:
           LLM_ROUTER_FAIL_OPEN_TO_DIRECT: ${{ vars.LLM_ROUTER_FAIL_OPEN_TO_DIRECT || 'true' }}
           FREELLMAPI_TEXT_MODEL: ${{ vars.FREELLMAPI_TEXT_MODEL || 'auto:smart' }}
           FREELLMAPI_VISION_MODEL: ${{ vars.FREELLMAPI_VISION_MODEL || 'auto:smart' }}
+          LEGACY_IDLE_CONFIRMED: ${{ inputs.legacy_idle_confirmed || 'false' }}
         run: |
           set -euo pipefail
 
@@ -113,6 +119,35 @@ jobs:
             name="$(docker inspect -f '{{.Name}}' "$cid" 2>/dev/null | sed 's#^/##')"
             project="$(docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$cid" 2>/dev/null || true)"
             if [ "$service" = "shorts-compose" ]; then
+              expected_project="$(docker compose config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["name"])')"
+              if [ "$project" != "$expected_project" ]; then
+                echo "ERROR: another Compose project owns port 4000; refusing to remove it"
+                exit 1
+              fi
+              # Stop accepting new renders and wait for current jobs. Older
+              # releases without the drain endpoint fail safely, never kill work.
+              if docker exec "$cid" node -e "fetch('http://127.0.0.1:4000/admin/drain',{method:'POST'}).then(r=>{if(!r.ok)throw Error('Drain endpoint unavailable; perform the documented first-upgrade procedure')}).catch(e=>{console.error(e.message);process.exit(1)})"; then
+                drain_supported=true
+              elif [ "$LEGACY_IDLE_CONFIRMED" = true ]; then
+                echo "Operator confirmed legacy service is idle for this one-time upgrade"
+                drain_supported=false
+              else
+                echo "Legacy service retained. Pause Shorts generation, confirm it is idle, then dispatch with legacy_idle_confirmed."
+                exit 1
+              fi
+              drained=false
+              if [ "$drain_supported" = false ]; then drained=true; fi
+              for attempt in $(seq 1 180); do
+                if [ "$drained" = true ]; then break; fi
+                active="$(docker exec "$cid" node -e "fetch('http://127.0.0.1:4000/health/jobs').then(r=>r.json()).then(j=>{if(!Number.isInteger(j.active))throw Error('Invalid job status');console.log(j.active)}).catch(()=>process.exit(1))")"
+                if [ "$active" = 0 ]; then drained=true; break; fi
+                sleep 10
+              done
+              if [ "$drained" != true ]; then
+                docker exec "$cid" node -e "fetch('http://127.0.0.1:4000/admin/resume',{method:'POST'})" || true
+                echo "ERROR: active renders did not drain; old service retained"
+                exit 1
+              fi
               echo "Removing stale shorts-compose container ${name:-$cid} (project=${project:-unknown}) holding host port 4000"
               docker rm -f "$cid"
             else

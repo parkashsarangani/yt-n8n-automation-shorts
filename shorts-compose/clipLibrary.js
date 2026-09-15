@@ -59,7 +59,7 @@ function meetsCurrentContractGate(row, contract) {
   if ((contract?.required_entities || []).length && Number(row?.entity_match || 0) < REUSE_ENTITY_THRESHOLD) return false;
   if ((contract?.required_actions || []).length && Number(row?.action_match || 0) < REUSE_ACTION_THRESHOLD) return false;
   if ((contract?.required_relationships || []).length && Number(row?.relationship_match || 0) < REUSE_RELATIONSHIP_THRESHOLD) return false;
-  if (contract?.visual_proof_mode === "annotated_real" && (!Array.isArray(row?.annotation_plan) || row.annotation_plan.length === 0)) return false;
+  if (contract?.visual_proof_mode === "annotated_real" && (row?.type !== 'image' || !row?.original_url)) return false;
   return true;
 }
 
@@ -112,7 +112,7 @@ async function rematerializeAnnotatedImage(row) {
   const local = row.local_path || cachedPathFromUrl(row.url);
   if (local && fs.existsSync(local)) return { ...row, local_path: local, cache_rebuilt: false };
   const source = String(row.original_url || "").trim();
-  if (!local || !source || !Array.isArray(row.annotation_plan) || row.annotation_plan.length === 0) return null;
+  if (!local || !source) return null;
 
   try {
     const r = await axios.get(source, {
@@ -166,6 +166,9 @@ async function recordAccepted(asset, contract, runId) {
   const row = {
     url: asset.url, original_url: asset.original_url || asset.url, local_path: asset.local_path || cachedPathFromUrl(asset.url),
     source: asset.source || "", type: asset.type || "", width: asset.width ?? null, height: asset.height ?? null,
+    attribution: asset.attribution || existing?.attribution || '',
+    license_url: asset.license_url || existing?.license_url || null,
+    source_page: asset.source_page || existing?.source_page || null,
     in_point_sec: asset.in_point_sec ?? null, out_point_sec: asset.out_point_sec ?? null, verified_frame_indices: asset.verified_frame_indices || null,
     annotation_plan: Array.isArray(asset.annotation_plan) ? asset.annotation_plan : null,
     semantic_match: asset.semantic_match ?? null, entity_match: asset.entity_match ?? null, action_match: asset.action_match ?? null,

@@ -12,6 +12,7 @@ const fsp = require("fs/promises");
 const path = require("path");
 const axios = require("axios");
 const retentionPolicy = require("./retentionPolicy");
+const store = require('./jsonStore');
 
 const DATA_DIR = path.dirname(process.env.TOPIC_HISTORY_PATH || "/app/data/topic_history.json");
 const PERF_PATH = path.join(DATA_DIR, "performance_history.json");
@@ -31,17 +32,11 @@ const SNAPSHOT_TARGETS = [
 ];
 
 async function readJson(p, fallback) {
-  try {
-    if (!fs.existsSync(p)) return fallback;
-    return JSON.parse(await fsp.readFile(p, "utf8"));
-  } catch {
-    return fallback;
-  }
+  return store.readJson(p, fallback);
 }
 
 async function writeJson(p, data) {
-  await fsp.mkdir(path.dirname(p), { recursive: true });
-  await fsp.writeFile(p, JSON.stringify(data, null, 2));
+  return store.writeJson(p, data);
 }
 
 function numOrNull(v) {
@@ -102,7 +97,7 @@ function normalizeCreativeDna(entry = {}) {
 async function logPublished(entry) {
   const vid = entry && entry.video_id;
   if (!vid) throw new Error("logPublished: video_id is required");
-  let hist = await readJson(PERF_PATH, []);
+  return store.updateJson(PERF_PATH, [], async hist => {
   if (hist.some((h) => h.video_id === vid)) {
     return { logged: false, reason: "already_logged", count: hist.length };
   }
@@ -120,6 +115,7 @@ async function logPublished(entry) {
     trigger: entry.trigger || null,
     duration: creativeDna.duration_sec,
     creative_dna: creativeDna,
+    retrieval_telemetry: Array.isArray(entry.retrieval_telemetry) ? entry.retrieval_telemetry : [],
     snapshots: {},
     latest_metrics: null,
     // Compatibility for older tooling. This is latest cumulative telemetry,
@@ -127,9 +123,10 @@ async function logPublished(entry) {
     metrics: null,
   });
 
-  if (hist.length > PERF_MAX) hist = hist.slice(hist.length - PERF_MAX);
-  await writeJson(PERF_PATH, hist);
+  if (hist.length > PERF_MAX) hist.splice(0, hist.length - PERF_MAX);
+  // The transaction persists the complete read-modify-write operation.
   return { logged: true, count: hist.length, policy_version: creativeDna.policy_version };
+  });
 }
 
 function parseAnalytics(body) {
@@ -364,7 +361,8 @@ DISCIPLINE:
 - Any comparison between creative choices requires at least 2 videos in EACH group; prefer 3+.
 - Never infer causality from one winner. Say "associated with" unless repeated evidence is clear.
 - Evaluate topic/archetype, hook wording, first-frame type/source, duration, payoff, visual grammar, captions and engagement mechanics separately when the data permits.
-- For the outro_experiment_arm, compare current_outro versus no_outro only when both have at least 2 measured videos in the SAME cohort.
+- hook-opening-v1 assignments were confounded with outro presence. Never infer hook or outro effects from those records. Only hook-opening-v2 is eligible for those comparisons; do not pool versions.
+- For the outro_experiment_arm, compare current_outro versus no_outro only within the same hook arm and cohort, with at least 10 measured videos in each cell. Otherwise report collecting, not a winner.
 - Evidence must name groups and actual metric values. Never invent channel statistics or preserve stale numbers from an older prompt.
 
 CREATIVE VARIABLES YOU MAY LEARN FROM:
@@ -475,11 +473,13 @@ async function ingestAnalytics(body) {
   const analyticsBody = body && body.analytics && body.analytics.columnHeaders ? body.analytics : body;
   assertMeasurablePayload(analyticsBody, body);
   const metricsById = parseAnalytics(analyticsBody);
-  const hist = await readJson(PERF_PATH, []);
+  let hist;
   let updated = 0;
   const captured = {};
   const measuredAt = new Date().toISOString();
 
+  await store.updateJson(PERF_PATH, [], async rows => {
+  hist = rows;
   for (const h of hist) {
     const m = metricsById[h.video_id];
     if (!m) continue;
@@ -489,7 +489,7 @@ async function ingestAnalytics(body) {
     if (keys.length) captured[h.video_id] = keys;
     updated++;
   }
-  await writeJson(PERF_PATH, hist);
+  });
 
   let insights = null;
   try {
@@ -505,7 +505,7 @@ async function ingestAnalytics(body) {
 // was just frozen so a curve is never compared against a different video age.
 async function ingestDeepMetrics(body) {
   const entries = Array.isArray(body && body.videos) ? body.videos : [];
-  const hist = await readJson(PERF_PATH, []);
+  return store.updateJson(PERF_PATH, [], async hist => {
   const byId = new Map(hist.map((h) => [h.video_id, h]));
   const measuredAt = (body && body.measured_at) || new Date().toISOString();
   let updated = 0;
@@ -525,8 +525,8 @@ async function ingestDeepMetrics(body) {
     if (key) attached[h.video_id] = key;
     updated++;
   }
-  await writeJson(PERF_PATH, hist);
   return { updated, attached, measured_at: measuredAt };
+  });
 }
 
 // Deep reports may arrive a little after batch metrics. They may only fill
@@ -551,6 +551,10 @@ function attachDeepSnapshot(entry, deep) {
 
 async function getInsights() {
   let insights = await readJson(INSIGHTS_PATH, {});
+  const generated=Date.parse(insights.generated_at || '');
+  if(!Number.isFinite(generated)||Date.now()-generated>7*24*3600*1000){
+    insights={...insights,guidance:[],avoid:[],experiments:[],stale:true,confidence_note:'No fresh strategy guidance within seven days; historical measurements remain available.'};
+  }
   // A saved strategist answer from the old measurement model can contain the
   // unsupported fixed-test-bucket assertion. Do not re-inject it into writers.
   if (insights.measurement_policy !== retentionPolicy.RETENTION_POLICY) {

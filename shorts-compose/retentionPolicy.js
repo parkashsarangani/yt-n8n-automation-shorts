@@ -1,7 +1,7 @@
 // Shared by generated n8n Code nodes and the compositor/analytics service.
 // Diagnostics are advisory. These are experiment rules, not YouTube gates.
 const RETENTION_POLICY = 'retention-v1';
-const HOOK_EXPERIMENT = 'hook-opening-v1';
+const HOOK_EXPERIMENT = 'hook-opening-v2';
 function finiteNumber(value) {
   if (value == null || typeof value === 'boolean' || String(value).trim() === '') return null;
   const number = Number(value);
@@ -13,7 +13,11 @@ function ratio(n, d) {
 }
 function assignHookExperiment(seed) {
   let hash = 2166136261;
-  for (const char of String(seed)) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); }
+  for (const char of `hook-opening-v2:${seed}`) { hash ^= char.charCodeAt(0); hash = Math.imul(hash, 16777619); }
+  // Avalanche before selecting a bit: FNV parity remains correlated even with
+  // different salts. Do not reuse the outro's low-bit assignment.
+  hash ^= hash >>> 16; hash = Math.imul(hash, 0x85ebca6b);
+  hash ^= hash >>> 13; hash = Math.imul(hash, 0xc2b2ae35); hash ^= hash >>> 16;
   return {id: HOOK_EXPERIMENT, policy: RETENTION_POLICY, arm: (hash >>> 0) % 2 ? 'concrete_question' : 'direct_contradiction', assignment_unit: 'execution', minimum_videos_per_arm: 10};
 }
 function contentScenes(script) {

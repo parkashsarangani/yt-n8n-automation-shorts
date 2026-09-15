@@ -12,6 +12,21 @@ process.env.OPENAI_KEY = "paid-openai-test-key";
 process.env.ANTHROPIC_KEY = "paid-anthropic-test-key";
 
 const routing = require("../llmRouting");
+test('free failure shares one deadline with direct fallback',async()=>{
+ const observed=[];
+ const result=await routing.requestViaRouter('chat',{model:'test'},{timeout:200,adapter:async config=>{
+  observed.push(config);
+  if(config.__llmRoute==='freellmapi'){await new Promise(r=>setTimeout(r,25));throw new Error('free failed');}
+  return {data:{ok:true},status:200,headers:{},config};
+ }});
+ assert.equal(result.fallback,true);assert.equal(observed.length,2);
+ assert.ok(observed[0].timeout<=110);assert.ok(observed[1].timeout<200&&observed[1].timeout>0);
+});
+test('cancelled free request never starts paid fallback',async()=>{
+ const controller=new AbortController();let calls=0;
+ await assert.rejects(routing.requestViaRouter('chat',{model:'test'},{timeout:200,signal:controller.signal,adapter:async()=>{calls++;controller.abort();throw new Error('disconnect');}}));
+ assert.equal(calls,1);
+});
 
 test("detects vision payloads and chooses the configured free vision route", () => {
   const body = {
@@ -90,64 +105,6 @@ test("Anthropic-compatible requests keep the Claude wire contract through FreeLL
   assert.equal(direct.data.model, "claude-original-paid-model");
   assert.equal(direct.headers["x-api-key"], "paid-anthropic-test-key");
   assert.equal(direct.headers["anthropic-version"], "2023-06-01");
-});
-
-test("free leg is capped well under the overall budget (execution 848 regression)", () => {
-  // Before this fix, the free leg used the FULL overall timeout, so a stuck
-  // upstream inside FreeLLMAPI's own provider chain could consume the whole
-  // client-side budget before the direct-paid fallback ever got a turn - n8n
-  // aborted the call at exactly the same moment llm-gateway was still mid-
-  // fallback (execution 848: "timeout of 120000ms exceeded").
-  assert.equal(routing.freeLegTimeout(120000), 45000);
-  assert.equal(routing.freeLegTimeout(30000), 30000, "never exceeds a smaller caller-supplied budget");
-  assert.equal(routing.freeLegTimeout(undefined), 45000, "falls back to the configured default overall timeout");
-});
-
-test("fallback leg always gets the remaining budget, never zero", () => {
-  assert.equal(routing.remainingFallbackTimeout(120000, 45000), 75000);
-  // Even if the free leg somehow ran past the entire overall budget, the
-  // direct fallback still gets a real window instead of an instantly-doomed
-  // near-zero timeout.
-  assert.equal(routing.remainingFallbackTimeout(120000, 130000), 5000);
-  assert.equal(routing.remainingFallbackTimeout(120000, 0), 120000);
-});
-
-test("requestViaRouter reserves the remaining budget for the direct fallback after a free-leg failure", async () => {
-  // requestViaRouter's HTTP calls go through a dedicated internal axios
-  // instance (rawAxios), not the shared axios default export, so mocking is
-  // done per-request via axios's own `adapter` config field rather than
-  // axios.defaults.adapter (which only the preloaded-interceptor path below
-  // observes).
-  const FREE_LEG_DELAY_MS = 200;
-  const seen = [];
-  const mockAdapter = async (config) => {
-    seen.push({ url: config.url, timeout: config.timeout });
-    if (config.url.includes("freellmapi")) {
-      await new Promise((resolve) => setTimeout(resolve, FREE_LEG_DELAY_MS));
-      const err = new Error("timeout of 45000ms exceeded");
-      err.config = config;
-      throw err;
-    }
-    return { data: { choices: [{ message: { content: "ok" } }] }, status: 200, statusText: "OK", headers: {}, config };
-  };
-
-  const result = await routing.requestViaRouter(
-    "chat",
-    { model: "gpt-paid-model", messages: [] },
-    { timeout: 120000, adapter: mockAdapter },
-  );
-  assert.equal(result.route, "direct");
-  assert.equal(result.fallback, true);
-
-  assert.equal(seen.length, 2);
-  assert.ok(seen[0].url.includes("freellmapi"));
-  assert.equal(seen[0].timeout, 45000, "free leg capped, not given the full 120000ms budget");
-  assert.ok(seen[1].url.includes("api.openai.com"));
-  // The free leg actually spent FREE_LEG_DELAY_MS before failing, so the
-  // fallback must get (roughly) the overall budget minus that elapsed time -
-  // never the full 120000ms again, and never near-zero either.
-  assert.ok(seen[1].timeout <= 120000 - FREE_LEG_DELAY_MS + 50, `direct fallback should reflect elapsed time, got ${seen[1].timeout}`);
-  assert.ok(seen[1].timeout > 100000, `direct fallback should still keep most of the budget, got ${seen[1].timeout}`);
 });
 
 test("preloaded axios interceptor really rewrites an existing direct OpenAI call", async () => {

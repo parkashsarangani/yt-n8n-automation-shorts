@@ -41,7 +41,7 @@ describe("persistent verified clip library", () => {
     }, contract), true);
   });
 
-  it("never reuses annotated_real without its pixel-grounded callout plan", () => {
+  it("reuses clean verified images with provenance, without retired callout plans", () => {
     const contract = {
       visual_proof_mode: "annotated_real",
       required_entities: ["beak"],
@@ -52,7 +52,7 @@ describe("persistent verified clip library", () => {
     assert.equal(library.meetsCurrentContractGate(scored, contract), false);
     assert.equal(library.meetsCurrentContractGate({
       ...scored,
-      annotation_plan: [{ label: "beak", x_pct: 50, y_pct: 50, w_pct: 12, h_pct: 8 }],
+      type:'image', original_url:'https://example.invalid/beak.jpg',
     }, contract), true);
   });
 
@@ -63,6 +63,7 @@ describe("persistent verified clip library", () => {
       original_url: "https://example.invalid/original.jpg",
       local_path: path.join(outputDir, "broll-cache", "annotated_test.jpg"),
       source: "wikimedia",
+      attribution: 'Example photographer / CC BY 4.0',
       type: "image",
       width: 1200,
       height: 800,
@@ -82,6 +83,7 @@ describe("persistent verified clip library", () => {
     }, "test-run");
     const rows = await library.load();
     assert.equal(rows.length, 1);
+    assert.equal(rows[0].attribution, 'Example photographer / CC BY 4.0');
     assert.deepEqual(rows[0].annotation_plan, [{ label: "target", x_pct: 40, y_pct: 55, w_pct: 20, h_pct: 16 }]);
     assert.deepEqual(rows[0].verified_frame_indices, [2, 3]);
     assert.equal(rows[0].width, 1200);
