@@ -436,13 +436,16 @@ async function mine() {
 }
 
 async function getSignals() {
-  return await readJson(SIGNALS_PATH, {
+  const data = await readJson(SIGNALS_PATH, {
     generated_at: null,
     summary: "No competitor mine has completed yet.",
     signals: [],
     avoid: [],
     execution_profiles: [],
   });
+  const generated=Date.parse(data.generated_at || '');
+  if(!Number.isFinite(generated)||Date.now()-generated>14*24*3600*1000)return {...data,signals:[],avoid:[],execution_profiles:[],stale:true,summary:'Competitor signals unavailable or older than fourteen days; do not treat them as current trends.'};
+  return {...data,stale:false};
 }
 
 module.exports = {

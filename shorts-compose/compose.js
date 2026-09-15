@@ -26,9 +26,11 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 const app = express();
 app.use(express.json({ limit: "50mb" }));
 // In-memory job store for the async compose pattern
-const jobStore = new Map();
+const {DurableJobs,installLifecycle}=require('./jobLifecycle');
+const jobStore = new DurableJobs(path.join(path.dirname(process.env.TOPIC_HISTORY_PATH || path.join(__dirname,'topic_history.json')),'compose-jobs'));
 
 const OUTPUT_DIR = process.env.OUTPUT_DIR || "/outputs";
+const beginDrain=installLifecycle(app,jobStore,OUTPUT_DIR);
 app.use("/outputs", express.static(OUTPUT_DIR));
 
 const MUSIC_DIR = process.env.MUSIC_DIR || path.join(__dirname, "music");
@@ -1171,15 +1173,20 @@ app.get("/compose-status/:jobId", (req, res) => {
     return res.status(404).json({ status: "not_found", error: `No job with id ${req.params.jobId}` });
   }
   if (job.status === "done") {
-    jobStore.delete(req.params.jobId);
+    // Terminal results remain readable for 24 hours; polling is idempotent.
     return res.json({ status: "done", success: true, ...job.result });
   }
   if (job.status === "failed") {
-    jobStore.delete(req.params.jobId);
+    // Terminal failures also survive retries and service restarts.
     return res.status(500).json({ status: "failed", success: false, error: job.error });
   }
   return res.json({ status: "processing" });
 });
 
 const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => console.log(`Studio compose engine listening on :${PORT}`));
+const server=app.listen(PORT, () => console.log(`Studio compose engine listening on :${PORT}`));
+process.on('SIGTERM',()=>{
+  beginDrain();
+  const finish=()=>{if(![...jobStore.values()].some(j=>j.status==='processing')){clearInterval(timer);server.close(()=>process.exit(0));}};
+  const timer=setInterval(finish,1000);finish();
+});

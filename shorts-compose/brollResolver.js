@@ -25,6 +25,7 @@ const {
 } = require("./visualContract");
 const { localSemanticRerank, diversifyCandidates } = require("./semanticReranker");
 const library = require("./clipLibrary");
+const {balancedPool} = require('./sourcePool');
 const {
   RUN_MAX_VISION_CALLS,
   getSceneLimit,
@@ -249,12 +250,12 @@ async function fromWikipedia(subject) {
   return hit ? [{ id: hit.id, type: "image", url: hit.url, thumb: hit.thumb, width: hit.width, height: hit.height, alt: hit.title, query: subject, source: "wikipedia", attribution: `Image via Wikipedia: ${hit.title}` }] : [];
 }
 
-async function collectCandidates(queries, subject) {
+async function collectCandidates(queries, subject, priority=[]) {
   const jobs = [];
   for (const q of queries) jobs.push(fromPexelsPhotos(q), fromPexelsVideos(q), fromPixabayPhotos(q), fromPixabayVideos(q), fromUnsplash(q), fromWikimediaCommons(q), fromOpenverse(q), fromNasaImages(q));
   jobs.push(fromWikipedia(subject));
   const groups = await Promise.all(jobs);
-  return dedupeCandidates(groups.flat()).slice(0, CANDIDATE_POOL_MAX);
+  return balancedPool(groups, CANDIDATE_POOL_MAX, priority);
 }
 
 async function fetchImageAsBase64(url) {
@@ -512,13 +513,17 @@ async function resolveBroll(input = {}) {
     for (; queryCursor < queryList.length && candidates.length < CANDIDATE_POOL_MAX; queryCursor += INITIAL_SEARCH_QUERIES) {
       const batch = queryList.slice(queryCursor, queryCursor + INITIAL_SEARCH_QUERIES); if (!batch.length) break;
       searchRounds++; queriesTried.push(...batch);
-      const external = await collectCandidates(batch, subj);
+      const external = await collectCandidates(batch, subj, input.source_priority || []);
       candidates = dedupeCandidates([...candidates, ...external]).filter((c) => !recent.has(c.url) || c.library_hit).slice(0, CANDIDATE_POOL_MAX);
       if (candidates.length >= VISION_TOP_N * 2) break;
       if (remainingDeadlineMs(state) < 5000) { state.budget_exhausted = "resolver_deadline_exhausted"; break; }
     }
     if (contract.visual_proof_mode === "annotated_real") candidates = candidates.filter((c) => c.type === "image");
-    if (!candidates.length) return { ok: false, reason: contract.visual_proof_mode === "annotated_real" ? "no_verified_image_candidates" : "no_candidates", threshold, queries_tried: queriesTried, visual_contract: contract };
+    if (!candidates.length) {
+      const fallback = templateFallbackResult(input, contract, state, null, threshold, getBudgetState(state.run_id,state.scene_budget));
+      if(fallback)return {...fallback,quality_gate_passed:false,selection_reason:'deterministic_template_fallback'};
+      return { ok: false, reason: contract.visual_proof_mode === "annotated_real" ? "no_verified_image_candidates" : "no_candidates", threshold, queries_tried: queriesTried, visual_contract: contract };
+    }
 
     candidates = await localSemanticRerank(candidates, target, contract.acceptable_visuals || []);
     candidates = diversifyCandidates(candidates, Math.max(VISION_TOP_N * 2, 16));

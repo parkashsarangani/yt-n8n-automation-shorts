@@ -154,6 +154,7 @@ before(async () => {
             ...process.env,
             PORT: String(COMPOSE_PORT),
             OUTPUT_DIR: path.join(__dirname, "_test_outputs"),
+            TOPIC_HISTORY_PATH: path.join(__dirname, "_test_outputs", "topic_history.json"),
             DEBUG_KEEP_TMP: "false",
             // Render mechanics are tested here; multimodal QA parsing/gating has
             // dedicated tests and must not require a live API key in CI.

@@ -1,15 +1,20 @@
 # YouTube Shorts Facts Automation Pipeline
 
 A self-hosted pipeline that researches, writes, voices, composes, validates and
-uploads vertical YouTube Shorts. The production path is n8n + OpenAI +
+uploads vertical YouTube Shorts. The production path is n8n + a FreeLLMAPI-first
+LLM gateway (bounded paid-provider fallback) +
 ElevenLabs + multi-source real-media retrieval + FFmpeg/Remotion.
+
+**Current contracts and upgrade instructions:** [post-PR163 coherence fixes](docs/post-pr163-coherence.md).
+This documents the independent hook experiment, lossless topic/render handoffs,
+publication checkpoints, storage, and the one-time safe deployment migration.
 
 ## Production architecture
 
 ```text
 n8n
   │
-  ├─ OpenAI — topic selection, script, visual contract
+  ├─ LLM gateway — topic selection, script, visual contract (free-first; bounded direct fallback)
   ├─ ElevenLabs — TTS + alignment
   │
   └─ shorts-compose (Docker-internal HTTP, not the public proxy)

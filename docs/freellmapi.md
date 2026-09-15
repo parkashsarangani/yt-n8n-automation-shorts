@@ -86,20 +86,25 @@ FREELLMAPI_TEXT_MODEL=auto:smart
 FREELLMAPI_VISION_MODEL=auto:smart
 FREELLMAPI_BASE_URL=http://freellmapi:3001/v1
 LLM_ROUTER_TIMEOUT_MS=120000
-LLM_ROUTER_FREE_TIMEOUT_MS=45000
 ```
 
-`LLM_ROUTER_TIMEOUT_MS` is the overall budget the caller gets for a single
-gateway call (free attempt plus, on failure, a paid-direct fallback).
-`LLM_ROUTER_FREE_TIMEOUT_MS` caps how much of that budget the FreeLLMAPI leg
-alone may use. FreeLLMAPI's own `auto:smart` routing tries multiple upstream
-providers in series internally, and any one of them can individually run
-close to the full request timeout - without this cap, a single slow/stuck
-provider inside that chain could consume the whole budget before FreeLLMAPI
-even reached a working one, leaving zero time for the direct-provider
-fallback to run before the caller (n8n) gave up. The router now always
-reserves `overall - elapsed` (minimum 5s) for the fallback leg, so the total
-never exceeds `LLM_ROUTER_TIMEOUT_MS` regardless of how the free leg fails.
+`LLM_ROUTER_TIMEOUT_MS` is only the gateway's fallback default. Every LLM node
+in the generated n8n workflow instead sends its own `x-llm-timeout-ms` header
+(its configured node timeout minus a 5s safety margin - see
+`coherence_contracts.py`), so the gateway's actual per-request deadline always
+tracks whatever timeout that specific node is set to, rather than a value that
+can silently drift out of sync with it.
+
+FreeLLMAPI's own `auto:smart` routing tries multiple upstream providers in
+series internally, and any one of them can individually run close to the full
+request deadline. `requestViaRouter` (`llmRouting.js`) gives the free leg up
+to 55% of the remaining deadline and, on failure, gives the paid-direct
+fallback whatever time is actually left - never the full budget again, so the
+two legs together can never exceed the caller's deadline. The deadline is
+also wired to an `AbortController`: if the n8n client disconnects (its own
+timeout fires, or the execution is cancelled) the in-flight upstream request
+is aborted immediately and no fallback is attempted, instead of wastefully
+continuing a call nothing is waiting on.
 
 `auto:smart` lets FreeLLMAPI choose among enabled free models. Vision requests
 are detected from OpenAI-compatible image content and can be routed separately

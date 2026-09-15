@@ -29,10 +29,14 @@ function safeUpstreamHeaders(req) {
 }
 
 async function proxy(surface, req, res) {
+  const controller=new AbortController();
+  const cancel=()=>{if(!res.writableEnded)controller.abort();};
+  res.on('close',cancel);
   try {
     const result = await requestViaRouter(surface, req.body || {}, {
       timeout: Number(req.get("x-llm-timeout-ms") || process.env.LLM_ROUTER_TIMEOUT_MS || 120000),
       headers: safeUpstreamHeaders(req),
+      signal: controller.signal,
     });
     const upstream = result.response;
     res.set("X-LLM-Route", result.route);
@@ -53,6 +57,7 @@ async function proxy(surface, req, res) {
 
     res.status(Number(upstream?.status || 200)).json(upstream?.data ?? {});
   } catch (error) {
+    if(controller.signal.aborted)return;
     const status = Number(error?.response?.status || 502);
     const data = error?.response?.data;
     console.error(`[llm-gateway] request failed surface=${surface} status=${status} error=${String(error?.message || error).replace(/\s+/g, " ").slice(0, 300)}`);
@@ -63,7 +68,7 @@ async function proxy(surface, req, res) {
         router: routingStatus(),
       },
     });
-  }
+  } finally {res.off('close',cancel);}
 }
 
 app.post("/v1/chat/completions", (req, res) => proxy("chat", req, res));

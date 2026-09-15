@@ -10,17 +10,6 @@ const FREELLMAPI_ANTHROPIC_MODEL = String(process.env.FREELLMAPI_ANTHROPIC_MODEL
 const OPENAI_KEY = String(process.env.OPENAI_KEY || "").trim();
 const ANTHROPIC_KEY = String(process.env.ANTHROPIC_KEY || process.env.ANTHROPIC_API_KEY || "").trim();
 const REQUEST_TIMEOUT_MS = Math.max(1000, Number(process.env.LLM_ROUTER_TIMEOUT_MS || 120000));
-// FreeLLMAPI's own auto:smart routing tries multiple upstream providers in
-// series (its dashboard logs showed nvidia -> cloudflare -> google chained
-// within a single request), and any one of them can individually take close
-// to the full REQUEST_TIMEOUT_MS. Left uncapped, a slow/stuck first provider
-// consumes the entire client-side budget before FreeLLMAPI even reaches a
-// working one, and this router's own paid-direct fallback then has zero time
-// left to run - the caller (n8n) aborts first. Capping the free leg well
-// under the overall budget guarantees the direct fallback always gets a real
-// chance to complete within whatever timeout the caller configured.
-const FREE_REQUEST_TIMEOUT_MS = Math.max(1000, Number(process.env.LLM_ROUTER_FREE_TIMEOUT_MS || 45000));
-const MIN_FALLBACK_TIMEOUT_MS = 5000;
 
 const DIRECT_OPENAI_ORIGIN = "https://api.openai.com/v1";
 const DIRECT_ANTHROPIC_ORIGIN = "https://api.anthropic.com/v1";
@@ -115,17 +104,6 @@ function withFreeModel(body, surface) {
   return { ...body, model: freeModelFor(body, surface) };
 }
 
-// Pure budget math, split out so the fix for execution 848 (n8n aborting
-// while llm-gateway's free-router fallback chain was still mid-attempt) is
-// directly unit-testable without mocking network timing.
-function freeLegTimeout(overallTimeout) {
-  return Math.min(Number(overallTimeout) || REQUEST_TIMEOUT_MS, FREE_REQUEST_TIMEOUT_MS);
-}
-
-function remainingFallbackTimeout(overallTimeout, elapsedMs) {
-  return Math.max(MIN_FALLBACK_TIMEOUT_MS, (Number(overallTimeout) || REQUEST_TIMEOUT_MS) - Number(elapsedMs || 0));
-}
-
 function makeFreeRequest(surface, body, config = {}) {
   if (!FREELLMAPI_API_KEY) throw new Error("FREELLMAPI_API_KEY is not configured");
   return {
@@ -154,20 +132,22 @@ function makeDirectRequest(surface, body, config = {}) {
 }
 
 async function requestViaRouter(surface, body, config = {}) {
+  const deadline = Date.now() + Number(config.timeout || REQUEST_TIMEOUT_MS);
+  const remaining = () => {
+    if(config.signal?.aborted) throw new Error('LLM request cancelled');
+    const ms=deadline-Date.now(); if(ms<=0)throw new Error('LLM request deadline exceeded'); return ms;
+  };
   if (!isFreeMode()) {
     const response = await rawAxios.request(makeDirectRequest(surface, body, config));
     return { response, route: "direct", fallback: false };
   }
 
-  const overallTimeout = Number(config.timeout || REQUEST_TIMEOUT_MS);
-  const startedAt = Date.now();
   try {
-    const response = await rawAxios.request(makeFreeRequest(surface, body, { ...config, timeout: freeLegTimeout(overallTimeout) }));
+    const response = await rawAxios.request(makeFreeRequest(surface, body, {...config, timeout: Math.max(1,Math.floor(remaining()*0.55))}));
     return { response, route: "freellmapi", fallback: false };
   } catch (freeError) {
     if (!FAIL_OPEN_TO_DIRECT) throw freeError;
-    const remainingTimeout = remainingFallbackTimeout(overallTimeout, Date.now() - startedAt);
-    const response = await rawAxios.request(makeDirectRequest(surface, body, { ...config, timeout: remainingTimeout }));
+    const response = await rawAxios.request(makeDirectRequest(surface, body, {...config, timeout:remaining()}));
     return { response, route: "direct", fallback: true, free_error: String(freeError?.message || freeError).slice(0, 500) };
   }
 }
@@ -193,24 +173,20 @@ function installAxiosRouting() {
       throw new Error("FREELLMAPI_API_KEY is not configured and fail-open is disabled");
     }
 
-    const overallTimeout = Number(config.timeout || REQUEST_TIMEOUT_MS);
     config.__llmOriginal = {
       surface,
       url: config.url,
       data: config.data,
       headers: { ...(config.headers || {}) },
-      timeout: overallTimeout,
+      timeout: config.timeout,
+      deadline: Date.now()+Number(config.timeout || REQUEST_TIMEOUT_MS),
+      signal: config.signal,
     };
     config.__llmRouted = true;
-    config.__llmStartedAt = Date.now();
+    config.timeout = Math.max(1,Math.floor(Number(config.timeout || REQUEST_TIMEOUT_MS)*0.55));
     config.url = freeTarget(surface);
     config.data = withFreeModel(body, surface);
     config.headers = freeHeaders(surface, config.headers);
-    // See FREE_REQUEST_TIMEOUT_MS above: cap the free leg well under the
-    // caller's overall budget so a stuck upstream inside FreeLLMAPI's own
-    // fallback chain cannot consume the whole thing and leave nothing for
-    // the direct-provider retry below.
-    config.timeout = freeLegTimeout(overallTimeout);
     return config;
   });
 
@@ -223,12 +199,12 @@ function installAxiosRouting() {
       const surface = original.surface || surfaceForUrl(original.url);
       if (!surface) throw error;
       const body = parseBody(original.data);
-      const overallTimeout = Number(original.timeout || config.timeout || REQUEST_TIMEOUT_MS);
-      const elapsed = Date.now() - Number(config.__llmStartedAt || Date.now());
-      const remainingTimeout = remainingFallbackTimeout(overallTimeout, elapsed);
+      const remaining=original.deadline-Date.now();
+      if(original.signal?.aborted || remaining<=0)throw error;
       const fallbackConfig = makeDirectRequest(surface, body, {
         headers: original.headers,
-        timeout: remainingTimeout,
+        timeout: remaining,
+        signal: original.signal,
       });
       fallbackConfig.__llmRetriedDirect = true;
       console.warn(`[llm-routing] FreeLLMAPI request failed; retrying ${surface} via direct provider: ${String(error?.message || error).slice(0, 300)}`);
@@ -247,8 +223,6 @@ function routingStatus() {
     anthropic_fallback_configured: Boolean(ANTHROPIC_KEY),
     text_model: FREELLMAPI_TEXT_MODEL,
     vision_model: FREELLMAPI_VISION_MODEL,
-    request_timeout_ms: REQUEST_TIMEOUT_MS,
-    free_request_timeout_ms: FREE_REQUEST_TIMEOUT_MS,
   };
 }
 
@@ -264,8 +238,6 @@ module.exports = {
   directTarget,
   makeFreeRequest,
   makeDirectRequest,
-  freeLegTimeout,
-  remainingFallbackTimeout,
   requestViaRouter,
   installAxiosRouting,
   routingStatus,
