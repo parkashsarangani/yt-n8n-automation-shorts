@@ -212,9 +212,19 @@ def patch_topic_dedup_retry(w: dict) -> None:
                 "conditions": {
                     "options": {"caseSensitive": True, "leftValue": "", "typeValidation": "strict", "version": 1},
                     "conditions": [{
-                        "leftValue": "={{ $json.success }}",
-                        "rightValue": False,
-                        "operator": {"type": "boolean", "operation": "true", "singleValue": False},
+                        # A bare truthy check on $json.success (the same unary
+                        # boolean operator "If Script Valid" uses) reliably
+                        # tests the LEFT side only; encoding the negation into
+                        # the expression itself, rather than trying to invert
+                        # it via rightValue/operator, is what actually behaves
+                        # as "exhausted" - a rightValue:false variant of this
+                        # operator was tried first and empirically evaluated
+                        # true on both dedup successes and failures alike
+                        # (execution 843 hit Fail: Topic Pool Exhausted despite
+                        # both attempts returning success:true).
+                        "leftValue": "={{ $json.success !== true }}",
+                        "rightValue": True,
+                        "operator": {"type": "boolean", "operation": "true", "singleValue": True},
                     }],
                     "combinator": "and",
                 },
@@ -711,6 +721,16 @@ def assert_invariants(w: dict) -> None:
             raise RuntimeError(f"topic dedup retry loop missing node: {name}")
     if node_by_name(w, DEDUP_NODE).get("onError") != "continueRegularOutput":
         raise RuntimeError("topic dedup node no longer survives a rejection to allow the retry loop")
+    # n8n's boolean "true" operator returns the left value verbatim and
+    # ignores rightValue entirely (confirmed against n8n-workflow's own
+    # filter-parameter.js: case 'true': return left). Execution 843 proved
+    # this the hard way: a rightValue:false variant of this same operator
+    # evaluated true on every run - including two dedup successes - and
+    # threw a false "exhausted" error. The condition must test truthiness
+    # of an already-negated expression, not lean on rightValue to invert it.
+    exhausted_condition = node_by_name(w, DEDUP_IF_NODE)["parameters"]["conditions"]["conditions"][0]
+    if "!== true" not in str(exhausted_condition.get("leftValue", "")):
+        raise RuntimeError("topic dedup exhaustion check no longer negates success in the expression itself")
     writer = str(node_by_name(w, "Claude: Draft Script (Stage 1)")["parameters"]["jsonBody"])
     if "averaged 84 views" in writer or "3.5x fewer views" in writer:
         raise RuntimeError("stale fixed channel statistics survived writer prompt")
