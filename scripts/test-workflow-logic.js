@@ -200,11 +200,11 @@ function main() {
   section('2. Request timeouts (the hung-execution bug)');
   // -------------------------------------------------------------------
   const timeoutExpectations = {
-    'Claude: Generate Topic': 120000,
-    'Claude: Commission Topic Shortlist': 120000,
+    'Claude: Generate Topic': 150000,
+    'Claude: Commission Topic Shortlist': 150000,
     'Claude: Visual Director': 180000,
     'Claude: Repair Script': 180000,
-    'Claude: Draft Script (Stage 1)': 120000,
+    'Claude: Draft Script (Stage 1)': 150000,
     'ElevenLabs: TTS+Timestamps': 60000,
   };
   for (const [name, expected] of Object.entries(timeoutExpectations)) {

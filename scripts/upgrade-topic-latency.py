@@ -20,7 +20,16 @@ GLOBAL_STATE_MARKER = "WORKFLOW_GLOBAL_STATIC_STATE"
 TOPIC_NODE = "Claude: Generate Topic"
 POOL_SIZE = 4
 MAX_TOKENS = 6000
-TIMEOUT_MS = 120000
+# llm-gateway's own worst-case budget for a single call (FreeLLMAPI leg plus
+# a paid-direct fallback) is bounded at LLM_ROUTER_TIMEOUT_MS (120000ms by
+# default - see llmRouting.js's requestViaRouter). A node timeout equal to
+# that value leaves zero margin for network/processing overhead between n8n
+# and the gateway, so n8n can abort a moment before the gateway's own
+# in-budget response arrives (execution 848: "timeout of 120000ms exceeded"
+# while the gateway was still mid-fallback). 150s gives real headroom above
+# the gateway's bound without approaching the 180s ceiling already used for
+# the heavier Visual Director/Repair Script calls.
+TIMEOUT_MS = 150000
 
 
 def node_by_name(workflow: dict, name: str) -> dict:
@@ -100,7 +109,7 @@ def upgrade(workflow: dict) -> dict:
 
     params["jsonBody"] = body
     patch_single_attempt_model(node, TIMEOUT_MS)
-    patch_single_attempt_model(node_by_name(workflow, "Claude: Draft Script (Stage 1)"), 120000)
+    patch_single_attempt_model(node_by_name(workflow, "Claude: Draft Script (Stage 1)"), TIMEOUT_MS)
     patch_script_retry_state(workflow)
     patch_compose_polling(workflow)
     return workflow
