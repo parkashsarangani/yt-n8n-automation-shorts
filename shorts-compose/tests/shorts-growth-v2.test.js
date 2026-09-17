@@ -156,6 +156,23 @@ test('creative DNA carries policy, duration target and outro experiment arm', ()
   assert.equal(dna.outro_experiment_arm, 'no_outro');
 });
 
+test('creative DNA carries hook_type and filters hook_candidates to real strings', () => {
+  const dna = feedback.normalizeCreativeDna({
+    creative_dna: {
+      concept_archetype: 'hidden_mechanism',
+      hook_type: 'direct_contradiction',
+      hook_candidates: ['Hook A', 'Hook B', 42, null, '  '],
+    },
+  });
+  assert.equal(dna.concept_archetype, 'hidden_mechanism');
+  assert.equal(dna.hook_type, 'direct_contradiction');
+  assert.deepEqual(dna.hook_candidates, ['Hook A', 'Hook B']);
+
+  const missing = feedback.normalizeCreativeDna({ creative_dna: { concept_archetype: 'hidden_mechanism' } });
+  assert.equal(missing.hook_type, null);
+  assert.equal(missing.hook_candidates, null);
+});
+
 test('stemmed lexical fallback catches a barely-reworded duplicate offline', async () => {
   const history = [{ topic: 'Your soda tab has been holding your straw wrong' }];
   const candidates = [{ topic: 'Your soda can tab holds your straw the wrong way' }];

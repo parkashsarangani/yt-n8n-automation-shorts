@@ -1100,26 +1100,14 @@ app.post("/resolve-broll", async (req, res) => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// Feedback loop. SHORTS-ONLY by construction: only videos this pipeline logs
-// here are ever measured or strategized, so long-form videos on the same
-// channel never enter the loop.
-// ---------------------------------------------------------------------------
-app.post("/performance/log", async (req, res) => {
-  try { res.json(await feedback.logPublished(req.body || {})); }
-  catch (e) { res.status(400).json({ error: String((e && e.message) || e) }); }
-});
+// Feedback loop's remaining route: /performance/log, /performance/ingest, and
+// /channel-insights are registered once already, above (SHORTS-ONLY by
+// construction: only videos this pipeline logs there are ever measured or
+// strategized, so long-form videos on the same channel never enter the loop).
+// This one has no earlier registration, so it lives here.
 app.get("/performance/measure-ids", async (req, res) => {
   try { res.json({ video_ids: await feedback.getMeasureIds() }); }
   catch (e) { res.status(500).json({ video_ids: [], error: String((e && e.message) || e) }); }
-});
-app.post("/performance/ingest", async (req, res) => {
-  try { res.json(await feedback.ingestAnalytics(req.body || {})); }
-  catch (e) { res.status(500).json({ error: String((e && e.message) || e) }); }
-});
-app.get("/channel-insights", async (req, res) => {
-  try { res.json(await feedback.getInsights()); }
-  catch (e) { res.status(500).json({ sample_size: 0, guidance: [], avoid: [], error: String((e && e.message) || e) }); }
 });
 
 // Topic intelligence store: every run generates many scored candidates and
