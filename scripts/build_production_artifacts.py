@@ -116,6 +116,11 @@ def build(root: Path, output: Path) -> dict:
     compose_out = output / "compose.js"
     resolver_out = output / "brollResolver.js"
 
+    # Independent hook critic, right after V5 creates Claude: Visual Director
+    # (the node it rewires around) and before growth policy, since the two are
+    # orthogonal: this only touches the Stage-1 writer's own hook selection.
+    run("scripts/upgrade-hook-critic-v1.py", str(workflow_out), str(workflow_out), cwd=root)
+
     # Growth policy is the final workflow/runtime layer by design, so no later
     # legacy transform can silently restore the old metrics, 90-topic cap, fixed
     # outro or stale performance assumptions.
