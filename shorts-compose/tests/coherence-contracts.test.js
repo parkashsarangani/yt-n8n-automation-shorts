@@ -25,6 +25,11 @@ test('canonical identity and intended strategy survive commissioning',()=>{
  assert.equal(picked.canonical_key,c[0].canonical_key);assert.equal(picked.strategy_arm,'explore');
  assert.throws(()=>run('Extract Generated Topic',response,{...prior,'Deduplicate Topic Pool':{shortlist:[]}}),/approved/);
 });
+test('topic generation prompt references measured archetype performance, not only the static seed list',()=>{
+ const body=n['Claude: Generate Topic'].parameters.jsonBody;
+ assert.match(body,/MEASURED ARCHETYPE PERFORMANCE.*JSON\.stringify\(\$\('Get Channel Insights'\)\.item\.json\.archetype_performance \|\| \{\}\)/);
+ assert.match(body,/fall back to these seed archetypes/);
+});
 test('all four joint hook/outro cells receive assignments under a new experiment version',()=>{
  const {assignHookExperiment,HOOK_EXPERIMENT}=require('../retentionPolicy');
  assert.equal(HOOK_EXPERIMENT,'hook-opening-v2');

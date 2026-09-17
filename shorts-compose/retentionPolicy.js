@@ -109,4 +109,43 @@ function experimentReport(history) {
       return {...s,status:a.length>=10 && b.length>=10 ? 'ready_for_review' : 'collecting',arms:{direct_contradiction:summarize(a),concrete_question:summarize(b)}};
     })};
 }
-module.exports={RETENTION_POLICY,HOOK_EXPERIMENT,finiteNumber,ratio,assignHookExperiment,creativeDiagnostics,renderedTiming,diagnoseMetrics,experimentReport};
+// Per-archetype performance, confidence-aware. A raw archetype average is
+// meaningless at n=1-2 (most archetypes today) - a 62% rate on 21 views must
+// not outrank a 52% rate on 1,295 views just because it's a bigger fraction.
+// Shrink each archetype's rate toward the channel-wide mean by
+// ARCHETYPE_PRIOR_STRENGTH pseudo-videos (a simple Beta-Binomial-style
+// posterior mean) and label confidence explicitly, so a topic-generation
+// prompt can tell "not enough data yet" from "genuinely the strongest arm".
+// Never claims to represent YouTube's own ranking - purely an internal,
+// configurable prioritization signal (see the growth-engine brief, "we do
+// not know YouTube's formula, so this is not it").
+const ARCHETYPE_PRIOR_STRENGTH = 8;
+const ARCHETYPE_MIN_DIRECTIONAL = 3;
+const ARCHETYPE_MIN_VALIDATED = 8;
+function archetypePerformance(history) {
+  const eligible = history.filter((h) =>
+    h.creative_dna?.concept_archetype &&
+    finiteNumber(h.snapshots?.t72h?.engaged_view_rate) !== null
+  );
+  if (!eligible.length) {
+    return { cohort: 't72h', measured_videos: 0, global_mean_engaged_view_rate: null,
+      prior_strength: ARCHETYPE_PRIOR_STRENGTH, archetypes: [] };
+  }
+  const globalMean = eligible.reduce((sum, h) => sum + h.snapshots.t72h.engaged_view_rate, 0) / eligible.length;
+  const groups = {};
+  for (const h of eligible) (groups[h.creative_dna.concept_archetype] ||= []).push(h);
+  const archetypes = Object.entries(groups).map(([archetype, rows]) => {
+    const n = rows.length;
+    const rawRate = rows.reduce((sum, h) => sum + h.snapshots.t72h.engaged_view_rate, 0) / n;
+    const adjustedRate = (n * rawRate + ARCHETYPE_PRIOR_STRENGTH * globalMean) / (n + ARCHETYPE_PRIOR_STRENGTH);
+    const status = n >= ARCHETYPE_MIN_VALIDATED ? 'validated' : n >= ARCHETYPE_MIN_DIRECTIONAL ? 'directional' : 'experimental';
+    return {
+      archetype, n, video_ids: rows.map((r) => r.video_id),
+      raw_engaged_view_rate: rawRate, adjusted_engaged_view_rate: adjustedRate,
+      median_views: median(rows.map((r) => r.snapshots.t72h.views)), status,
+    };
+  }).sort((a, b) => b.adjusted_engaged_view_rate - a.adjusted_engaged_view_rate);
+  return { cohort: 't72h', measured_videos: eligible.length, global_mean_engaged_view_rate: globalMean,
+    prior_strength: ARCHETYPE_PRIOR_STRENGTH, archetypes };
+}
+module.exports={RETENTION_POLICY,HOOK_EXPERIMENT,finiteNumber,ratio,assignHookExperiment,creativeDiagnostics,renderedTiming,diagnoseMetrics,experimentReport,archetypePerformance};
