@@ -562,7 +562,8 @@ async function getInsights() {
   }
   const history = await readJson(PERF_PATH, []);
   return {...insights, measurement_policy:retentionPolicy.RETENTION_POLICY,
-    hook_experiment:retentionPolicy.experimentReport(history)};
+    hook_experiment:retentionPolicy.experimentReport(history),
+    archetype_performance:retentionPolicy.archetypePerformance(history)};
 }
 
 async function getMeasureIds({ maxDays = 60, limit = 200 } = {}) {
