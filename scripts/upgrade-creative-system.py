@@ -45,7 +45,7 @@ def voice_bible() -> str:
     p = Path("shorts-compose/channel-voice.json")
     if not p.exists():
         raise FileNotFoundError(str(p))
-    return json.dumps(json.loads(p.read_text()), separators=(",", ":"))
+    return json.dumps(json.loads(p.read_text(encoding="utf-8")), separators=(",", ":"))
 
 
 def patch_topic_search(w: dict) -> None:
@@ -327,8 +327,8 @@ def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit("usage: upgrade-creative-system.py INPUT_WORKFLOW OUTPUT_WORKFLOW")
     src, dst = map(Path, sys.argv[1:])
-    w = json.loads(src.read_text())
-    dst.write_text(json.dumps(upgrade(w), indent=2) + "\n")
+    w = json.loads(src.read_text(encoding="utf-8"))
+    dst.write_text(json.dumps(upgrade(w), indent=2) + "\n", encoding="utf-8")
     print(f"creative system workflow written to {dst}")
 
 

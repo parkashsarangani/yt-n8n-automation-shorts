@@ -140,13 +140,13 @@ def main() -> None:
     if len(sys.argv) not in (2, 3):
         raise SystemExit("usage: visual_matching_v4_compose.py INPUT [OUTPUT]")
     src = Path(sys.argv[1]); dst = Path(sys.argv[2]) if len(sys.argv) == 3 else src
-    out = upgrade(src.read_text())
+    out = upgrade(src.read_text(encoding="utf-8"))
     for marker in (MARKER, NON_BLOCKING_QA_MARKER, BT709_MARKER):
         if marker not in out:
             raise RuntimeError(f"compose production guarantee missing: {marker}")
     if "Final visual QA rejected catastrophic render defects" in out:
         raise RuntimeError("blocking final visual QA was reintroduced")
-    dst.write_text(out)
+    dst.write_text(out, encoding="utf-8")
     print(f"{MARKER} compose written to {dst}")
 
 

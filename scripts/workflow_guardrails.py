@@ -213,7 +213,7 @@ def assert_workflow_contracts(workflow: dict) -> None:
     if "maximum is 1" not in merge_code or "scene 0 cannot be a Remotion template" not in merge_code:
         raise RuntimeError("merge payload lost Remotion template cap")
 
-    docker = (ROOT / "docker-compose.yml").read_text()
+    docker = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     expected_env = (
         f"BROLL_SCORE_THRESHOLD=${{BROLL_SCORE_THRESHOLD:-{BROLL_SUPPORT_TARGET}}}",
         f"BROLL_FIRST_FRAME_THRESHOLD=${{BROLL_FIRST_FRAME_THRESHOLD:-{BROLL_FIRST_FRAME_TARGET}}}",

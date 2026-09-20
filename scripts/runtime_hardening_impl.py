@@ -166,7 +166,7 @@ console.log('b-roll soft fallback regression OK');'''
     if p.returncode!=0: raise RuntimeError("b-roll soft fallback regression failed:\n"+p.stdout+p.stderr)
 
 def upgrade(path: Path) -> None:
-    text=path.read_text();text=replace_required(text,SAFE_GET_OLD,SAFE_GET_NEW,"stock lookup retry");text=replace_required(text,PARSE_SCORE_OLD,PARSE_SCORE_NEW,"vision score JSON recovery")
+    text=path.read_text(encoding="utf-8");text=replace_required(text,SAFE_GET_OLD,SAFE_GET_NEW,"stock lookup retry");text=replace_required(text,PARSE_SCORE_OLD,PARSE_SCORE_NEW,"vision score JSON recovery")
     text=replace_required(text,'const RUN_MAX_VISION_CALLS = Math.max(1, Number(process.env.BROLL_RUN_MAX_VISION_CALLS || 18));','const RUN_MAX_VISION_CALLS = Math.max(1, Number(process.env.BROLL_RUN_MAX_VISION_CALLS || 28));',"run-level vision budget")
     text=replace_required(text,TARGET_OLD,TARGET_NEW,"b-roll scoring target priority")
     if SOFT_FALLBACK_MARKER not in text:
@@ -178,7 +178,7 @@ def upgrade(path: Path) -> None:
     if MARKER not in text: raise RuntimeError("b-roll runtime hardening marker missing after transform")
     if SOFT_FALLBACK_MARKER not in text or "quality_gate_passed:false" not in text.replace(" ",""): raise RuntimeError("b-roll soft fallback did not land")
     if "BROLL_RUN_MAX_VISION_CALLS || 18" in text: raise RuntimeError("stale 18-call run default survived runtime hardening")
-    self_test_soft_fallback(text);self_test_visual_retrieval(text);path.write_text(text)
+    self_test_soft_fallback(text);self_test_visual_retrieval(text);path.write_text(text, encoding="utf-8")
 
 def main() -> None:
     if len(sys.argv)!=2: raise SystemExit("usage: upgrade-compose-runtime-hardening.py BROLL_RESOLVER_JS")

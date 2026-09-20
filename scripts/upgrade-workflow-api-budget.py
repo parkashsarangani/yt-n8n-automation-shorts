@@ -34,8 +34,8 @@ def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit("usage: upgrade-workflow-api-budget.py INPUT_WORKFLOW OUTPUT_WORKFLOW")
     src, dst = map(Path, sys.argv[1:])
-    workflow = json.loads(src.read_text())
-    dst.write_text(json.dumps(upgrade(workflow), indent=2) + "\n")
+    workflow = json.loads(src.read_text(encoding="utf-8"))
+    dst.write_text(json.dumps(upgrade(workflow), indent=2) + "\n", encoding="utf-8")
     print(f"API budget workflow written to {dst}")
 
 
