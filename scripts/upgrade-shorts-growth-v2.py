@@ -40,9 +40,12 @@ def patch_topic_policy(w: dict) -> None:
     policy = (
         f"{MARKER} TOPIC ALLOCATION - treat topic choice as controlled exploration, not equal category rotation. "
         "Generate EXACTLY 10 candidates split 7 exploit / 2 adjacent / 1 explore. "
-        "EXPLOIT means a proven viewing archetype supported by current measured guidance; initial seed archetypes are: "
+        "EXPLOIT means a proven viewing archetype supported by current measured performance data below, not a fixed list; "
+        "until enough Shorts are measured for a given archetype, fall back to these seed archetypes: "
         "(a) a familiar everyday object with a hidden function/mechanism, (b) a recognizable thing with a counterintuitive physical mechanism, "
         "(c) a famous action explained by surprising physics, (d) an instantly understood scale contradiction. "
+        "MEASURED ARCHETYPE PERFORMANCE (adjusted for sample size; only 'validated' or 'directional' status is reliable signal - "
+        "'experimental' entries are too small to trust yet, use the seed list above instead): \" + JSON.stringify($('Get Channel Insights').item.json.archetype_performance || {}) + \"\\n\\n"
         "ADJACENT keeps a proven curiosity mechanism but moves to a materially different subject. EXPLORE tries a genuinely new viewing mechanism. "
         "Every candidate MUST include strategy_arm='exploit'|'adjacent'|'explore', subject_key, mechanism_key, payoff_key, and canonical_key='subject|mechanism|payoff'. "
         "These keys describe the underlying FACT, not its wording, so paraphrases retain the same identity. The exact 7/2/1 allocation is mandatory. "

@@ -14,6 +14,7 @@ process.env.TOPIC_HISTORY_MAX = '500';
 
 const topicPolicy = require('../topicPolicy');
 const feedback = require('../feedbackLoop');
+const retentionPolicy = require('../retentionPolicy');
 
 test('topic history no-repeat horizon is at least 500 Shorts', () => {
   assert.equal(topicPolicy.HISTORY_LIMIT, 500);
@@ -319,4 +320,59 @@ test('analytics ingest still accepts a genuine empty measurement window', async 
 
   if (prior === undefined) delete process.env.TOPIC_HISTORY_PATH; else process.env.TOPIC_HISTORY_PATH = prior;
   delete require.cache[require.resolve('../feedbackLoop')];
+});
+
+test('shortlistCandidates sorts survivors by score and filters to the requested arm', async () => {
+  const candidates = [
+    { topic: 'A distinct fact about volcanoes and lava composition', score: 90, strategy_arm: 'exploit' },
+    { topic: 'A distinct fact about deep sea creatures and bioluminescence', score: 50, strategy_arm: 'exploit' },
+    { topic: 'A distinct fact about glacier movement and ice cores', score: 70, strategy_arm: 'exploit' },
+    { topic: 'A distinct fact about coral reef bleaching and temperature', score: 100, strategy_arm: 'adjacent' },
+    { topic: 'A distinct fact about desert sand dune formation patterns', score: 60, strategy_arm: 'adjacent' },
+  ];
+  const result = await topicPolicy.shortlistCandidates({ candidates, desired_strategy_arm: 'exploit', history: [] });
+  assert.deepEqual(result.shortlist.map((c) => c.score), [90, 70, 50]);
+  assert.ok(result.shortlist.every((c) => c.strategy_arm === 'exploit'));
+  assert.equal(result.desired_strategy_arm, 'exploit');
+});
+
+test('shortlistCandidates falls back to the full sorted pool when the requested arm is empty', async () => {
+  const candidates = [
+    { topic: 'A distinct fact about tectonic plate boundaries shifting', score: 40, strategy_arm: 'adjacent' },
+    { topic: 'A distinct fact about migratory bird navigation senses', score: 95, strategy_arm: 'adjacent' },
+  ];
+  const result = await topicPolicy.shortlistCandidates({ candidates, desired_strategy_arm: 'exploit', history: [] });
+  assert.deepEqual(result.shortlist.map((c) => c.score), [95, 40], 'no exploit candidates exist, so the full pool (sorted) is used instead');
+});
+
+test('archetypePerformance shrinks small-sample archetypes toward the channel mean and labels confidence', () => {
+  const mk = (archetype, evr, id) => ({
+    video_id: id,
+    creative_dna: { concept_archetype: archetype },
+    snapshots: { t72h: { engaged_view_rate: evr, views: 1000 } },
+  });
+  const history = [
+    mk('rare_archetype', 0.9, 'a1'),
+    ...Array.from({ length: 10 }, (_, i) => mk('common_archetype', 0.5, `b${i}`)),
+    ...Array.from({ length: 3 }, (_, i) => mk('mid_archetype', 0.1, `c${i}`)),
+  ];
+  const result = retentionPolicy.archetypePerformance(history);
+  assert.equal(result.measured_videos, 14);
+  const byArchetype = Object.fromEntries(result.archetypes.map((a) => [a.archetype, a]));
+
+  assert.equal(byArchetype.rare_archetype.n, 1);
+  assert.equal(byArchetype.rare_archetype.status, 'experimental');
+  assert.equal(byArchetype.common_archetype.n, 10);
+  assert.equal(byArchetype.common_archetype.status, 'validated');
+  assert.equal(byArchetype.mid_archetype.n, 3);
+  assert.equal(byArchetype.mid_archetype.status, 'directional');
+
+  const rareShrink = Math.abs(byArchetype.rare_archetype.adjusted_engaged_view_rate - byArchetype.rare_archetype.raw_engaged_view_rate);
+  const commonShrink = Math.abs(byArchetype.common_archetype.adjusted_engaged_view_rate - byArchetype.common_archetype.raw_engaged_view_rate);
+  assert.ok(rareShrink > commonShrink, 'a single-video archetype should shrink far more toward the mean than a 10-video one');
+  assert.ok(
+    Math.abs(byArchetype.rare_archetype.adjusted_engaged_view_rate - result.global_mean_engaged_view_rate) <
+    Math.abs(byArchetype.rare_archetype.raw_engaged_view_rate - result.global_mean_engaged_view_rate),
+    'the adjusted rate must sit closer to the global mean than the raw rate did'
+  );
 });
