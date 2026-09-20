@@ -90,6 +90,11 @@ test('durable completion survives restart and cleanup refuses arbitrary paths',a
   assert.equal((await fetch(url+'/compose',{method:'POST'})).status,503);
  }finally{clearInterval(jobs.timer);clearInterval(restored.timer);await new Promise(r=>server.close(r));}
 });
+test('published creative DNA captures hook_type and hook_candidates from the accepted script',()=>{
+ const body=n['Log Published Video'].parameters.jsonBody;
+ assert.match(body,/concept_archetype:.*hook_type: \$\('Merge By scene_index \(not position\)'\)\.first\(\)\.json\.script_snapshot\.hook_type \|\| null/);
+ assert.match(body,/hook_candidates: \$\('Merge By scene_index \(not position\)'\)\.first\(\)\.json\.script_snapshot\.hook_candidates \|\| null/);
+});
 test('fallback excludes outro from the content-template count',()=>{
  const body=n['Resolve B-roll'].parameters.jsonBody;
  assert.match(body,/planned_template_count:.*!sc.template_data\?\.is_outro/);
