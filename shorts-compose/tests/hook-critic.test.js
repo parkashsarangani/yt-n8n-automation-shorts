@@ -33,6 +33,15 @@ test('hook critic node exists and is wired between Parse Draft JSON and Claude: 
   assert.equal(w.connections['Apply Hook Critique'].main[0][0].node, 'Claude: Visual Director');
 });
 
+test('critic node fails open at the n8n level too, not only in Apply Hook Critique\'s JS', () => {
+  // Apply Hook Critique's fail-open logic never runs at all if the critic node
+  // itself aborts the whole execution on a real API error - n8n's default
+  // onError is "stopWorkflow". Without this explicit override, a single failed
+  // critic call (timeout, 429, gateway hiccup) would kill an otherwise-healthy
+  // publish run, exactly the failure mode this feature exists to avoid.
+  assert.equal(n['Claude: Critique Hooks'].onError, 'continueRegularOutput');
+});
+
 test('critic prompt sends the real candidates, topic, and archetype performance', () => {
   const body = n['Claude: Critique Hooks'].parameters.jsonBody;
   assert.match(body, /INDEPENDENT HOOK CRITIC/);

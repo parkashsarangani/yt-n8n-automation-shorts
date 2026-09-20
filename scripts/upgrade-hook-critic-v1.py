@@ -91,6 +91,12 @@ def upgrade(w: dict) -> dict:
         critic["position"] = [draft["position"][0] + 300, draft["position"][1] + 160]
         critic["parameters"]["jsonBody"] = CRITIC_PROMPT
         critic["parameters"].setdefault("options", {})["timeout"] = 60000
+        # Fail open for real, not just in Apply Hook Critique's JS: without this,
+        # n8n's default onError ("stopWorkflow") means a critic API error/timeout
+        # aborts the ENTIRE run instead of falling back to the writer's own hook -
+        # exactly the failure mode this node exists to avoid. Same idiom already
+        # used on Deduplicate Topic Pool, Post First Comment, Get Channel Insights.
+        critic["onError"] = "continueRegularOutput"
         hp = critic["parameters"].get("headerParameters", {}).get("parameters", [])
         for h in hp:
             if h.get("name") == "x-llm-timeout-ms":
