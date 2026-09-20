@@ -152,7 +152,11 @@ test('TTS and upload metadata use accepted values when rejected validator reads 
   const accepted=draftFixture();
   const lookup=name=> {
     assert.notEqual(name,'Validate Final Script','no ambiguous validator reads');
-    assert.ok(['Capture Accepted Script','Merge By scene_index (not position)','YouTube: Upload Draft'].includes(name));
+    // Extract Generated Topic runs once per publish, before any script-repair
+    // attempt, so - unlike Validate Final Script - it carries no multi-run
+    // ambiguity; Post First Comment's send_to_person reference is safe here.
+    assert.ok(['Capture Accepted Script','Merge By scene_index (not position)','YouTube: Upload Draft','Extract Generated Topic'].includes(name));
+    if(name==='Extract Generated Topic') return {item:{json:{send_to_person:'the friend who never believes wild facts'}}};
     return {first:()=>({json:{script_snapshot:accepted,publication_description:'Accepted description',id:'video-id'}})};
   };
   const tts=JSON.parse(evalExpression(body('ElevenLabs: TTS+Timestamps'),{narration:'Scene narration'},lookup));

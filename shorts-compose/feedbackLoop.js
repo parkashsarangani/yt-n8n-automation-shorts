@@ -68,6 +68,10 @@ function normalizeCreativeDna(entry = {}) {
     topic_predicted_score: numOrNull(dna.topic_predicted_score ?? entry.topic_predicted_score),
     canonical_key: dna.canonical_key || entry.canonical_key || null,
     concept_archetype: dna.concept_archetype || null,
+    hook_type: dna.hook_type || null,
+    hook_candidates: Array.isArray(dna.hook_candidates)
+      ? dna.hook_candidates.filter((h) => typeof h === "string" && h.trim())
+      : null,
     creative_format: dna.creative_format || null,
     visual_grammar: dna.visual_grammar || null,
     first_frame_type: dna.first_frame_type || null,
@@ -396,6 +400,65 @@ OUTPUT ONLY JSON:
 }
 Prefer 3 strong findings to 10 padded ones.`;
 
+// response_format:{type:"json_object"} only guarantees the top level parses as
+// JSON - it enforces nothing about the shape of guidance/avoid/experiments, so
+// a syntactically valid response can still contain the wrong types (an object
+// where a string was expected, etc.) and would otherwise be persisted verbatim
+// and served forever by /channel-insights. Returns null when valid, or a short
+// human-readable reason string when not.
+function validateStrategistInsights(obj) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return "response is not a JSON object";
+  if (obj.sample_size != null && typeof obj.sample_size !== "number") return "sample_size must be a number";
+  if (obj.cohort != null && typeof obj.cohort !== "string") return "cohort must be a string";
+  if (obj.confidence_note != null && typeof obj.confidence_note !== "string") return "confidence_note must be a string";
+  for (const field of ["avoid", "experiments"]) {
+    if (obj[field] == null) continue;
+    if (!Array.isArray(obj[field])) return `${field} must be an array`;
+    if (obj[field].some((v) => typeof v !== "string")) return `${field} must contain only strings`;
+  }
+  if (obj.guidance != null) {
+    if (!Array.isArray(obj.guidance)) return "guidance must be an array";
+    for (const g of obj.guidance) {
+      if (!g || typeof g !== "object" || Array.isArray(g)) return "guidance entries must be objects";
+      for (const key of ["area", "stage", "advice", "evidence"]) {
+        if (g[key] != null && typeof g[key] !== "string") return `guidance.${key} must be a string`;
+      }
+    }
+  }
+  return null;
+}
+
+async function callStrategist(cohort, correction) {
+  const prompt =
+    STRATEGIST_PROMPT(cohort.key, JSON.stringify(cohort.rows, null, 2)) +
+    (correction
+      ? `\n\nYour previous response was invalid: ${correction}. Return ONLY corrected JSON matching the schema above - no other changes.`
+      : "");
+  const res = await axios.post(
+    "https://api.openai.com/v1/chat/completions",
+    {
+      model: STRATEGIST_MODEL,
+      max_completion_tokens: 2600,
+      reasoning_effort: "medium",
+      response_format: { type: "json_object" },
+      messages: [{ role: "user", content: prompt }],
+    },
+    {
+      timeout: 60000,
+      headers: {
+        Authorization: `Bearer ${OPENAI_KEY}`,
+        "content-type": "application/json",
+      },
+    }
+  );
+
+  const text = res.data?.choices?.[0]?.message?.content || "";
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start < 0 || end < 0) throw new Error("strategist returned no JSON: " + text.slice(0, 200));
+  return JSON.parse(text.slice(start, end + 1));
+}
+
 async function runStrategist(history) {
   const cohort = selectStrategistCohort(history);
   if (!cohort.count) {
@@ -416,29 +479,22 @@ async function runStrategist(history) {
   }
   if (!OPENAI_KEY) throw new Error("runStrategist: OPENAI_KEY is not set");
 
-  const res = await axios.post(
-    "https://api.openai.com/v1/chat/completions",
-    {
-      model: STRATEGIST_MODEL,
-      max_completion_tokens: 2600,
-      reasoning_effort: "medium",
-      response_format: { type: "json_object" },
-      messages: [{ role: "user", content: STRATEGIST_PROMPT(cohort.key, JSON.stringify(cohort.rows, null, 2)) }],
-    },
-    {
-      timeout: 60000,
-      headers: {
-        Authorization: `Bearer ${OPENAI_KEY}`,
-        "content-type": "application/json",
-      },
+  // Never let a syntactically-valid-but-wrong-shaped response reach topic
+  // selection: validate, retry once with the concrete failure reason, and if
+  // it's still invalid, throw without writing - channel_insights.json keeps
+  // whatever the last actually-valid response was (true last-known-good,
+  // achieved by simply never overwriting it with something unvalidated).
+  let insights = await callStrategist(cohort);
+  let reason = validateStrategistInsights(insights);
+  if (reason) {
+    insights = await callStrategist(cohort, reason);
+    reason = validateStrategistInsights(insights);
+    if (reason) {
+      throw new Error(
+        `strategist returned an invalid response shape twice in a row (${reason}); keeping last-known-good channel_insights.json`
+      );
     }
-  );
-
-  const text = res.data?.choices?.[0]?.message?.content || "";
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start < 0 || end < 0) throw new Error("strategist returned no JSON: " + text.slice(0, 200));
-  const insights = JSON.parse(text.slice(start, end + 1));
+  }
   insights.measurement_policy = retentionPolicy.RETENTION_POLICY;
   insights.generated_at = new Date().toISOString();
   insights.measured_count = cohort.count;
@@ -562,7 +618,8 @@ async function getInsights() {
   }
   const history = await readJson(PERF_PATH, []);
   return {...insights, measurement_policy:retentionPolicy.RETENTION_POLICY,
-    hook_experiment:retentionPolicy.experimentReport(history)};
+    hook_experiment:retentionPolicy.experimentReport(history),
+    archetype_performance:retentionPolicy.archetypePerformance(history)};
 }
 
 async function getMeasureIds({ maxDays = 60, limit = 200 } = {}) {
@@ -600,6 +657,7 @@ module.exports = {
   getMeasureIds,
   getMeasurementPlan,
   runStrategist,
+  validateStrategistInsights,
   parseAnalytics,
   normalizeCreativeDna,
   captureDueSnapshots,

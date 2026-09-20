@@ -25,6 +25,11 @@ test('canonical identity and intended strategy survive commissioning',()=>{
  assert.equal(picked.canonical_key,c[0].canonical_key);assert.equal(picked.strategy_arm,'explore');
  assert.throws(()=>run('Extract Generated Topic',response,{...prior,'Deduplicate Topic Pool':{shortlist:[]}}),/approved/);
 });
+test('topic generation prompt references measured archetype performance, not only the static seed list',()=>{
+ const body=n['Claude: Generate Topic'].parameters.jsonBody;
+ assert.match(body,/MEASURED ARCHETYPE PERFORMANCE.*JSON\.stringify\(\$\('Get Channel Insights'\)\.item\.json\.archetype_performance \|\| \{\}\)/);
+ assert.match(body,/fall back to these seed archetypes/);
+});
 test('all four joint hook/outro cells receive assignments under a new experiment version',()=>{
  const {assignHookExperiment,HOOK_EXPERIMENT}=require('../retentionPolicy');
  assert.equal(HOOK_EXPERIMENT,'hook-opening-v2');
@@ -46,6 +51,27 @@ test('publication checkpoint precedes optional updates and cleanup has an implem
  assert.ok(!n['Tag Video with scene_index']);
  assert.equal((compose.match(/app.post\("\/performance\/log"/g)||[]).length,1);
  assert.ok(compose.includes('installLifecycle'));assert.ok(!compose.includes('jobStore.delete(req.params.jobId)'));
+});
+test('first-comment share CTA names the specific recipient when the topic stage provided one, else falls back to the generic ask',()=>{
+ const body=n['Post First Comment'].parameters.jsonBody;
+ const stripped=body.replace(/^=\{\{/,'').replace(/\}\}$/,'');
+ assert.doesNotThrow(()=>new Function('$',stripped));
+ const mk=(json)=>({item:{json},first:()=>({json})});
+ const evalWith=(sendToPerson)=>{
+  const $=(key)=>{
+   if(key==='YouTube: Upload Draft')return mk({uploadId:'vid123'});
+   if(key==='Merge By scene_index (not position)')return mk({script_snapshot:{comment_hook:'Would you have guessed this? Yes or no?'}});
+   if(key==='Extract Generated Topic')return mk({send_to_person:sendToPerson});
+   return mk({});
+  };
+  const fn=new Function('$','return '+stripped.replace(/^=/,''));
+  return JSON.parse(fn($)).snippet.topLevelComment.snippet.textOriginal;
+ };
+ const named=evalWith('the friend who never believes wild facts');
+ assert.match(named,/send this to the friend who never believes wild facts\./);
+ assert.doesNotMatch(named,/someone who needs to see it/);
+ const fallback=evalWith('');
+ assert.match(fallback,/send this to someone who needs to see it\./);
 });
 test('source cap retains exact Wikipedia hit and every populated provider',()=>{
  const {balancedPool}=require('../sourcePool');const sources=['pexels','pexels_video','pixabay','pixabay_video','unsplash','wikimedia','openverse','nasa'];
@@ -101,6 +127,11 @@ test('writer prompt lifts the hype-word ban but keeps the fact-accuracy hard lin
  assert.match(body,/never invent a fact, statistic, or event that is not real/);
  const stripped=body.replace(/^=\{\{/,'').replace(/\}\}$/,'');
  assert.doesNotThrow(()=>new Function('$',stripped));
+});
+test('published creative DNA captures hook_type and hook_candidates from the accepted script',()=>{
+ const body=n['Log Published Video'].parameters.jsonBody;
+ assert.match(body,/concept_archetype:.*hook_type: \$\('Merge By scene_index \(not position\)'\)\.first\(\)\.json\.script_snapshot\.hook_type \|\| null/);
+ assert.match(body,/hook_candidates: \$\('Merge By scene_index \(not position\)'\)\.first\(\)\.json\.script_snapshot\.hook_candidates \|\| null/);
 });
 test('fallback excludes outro from the content-template count',()=>{
  const body=n['Resolve B-roll'].parameters.jsonBody;

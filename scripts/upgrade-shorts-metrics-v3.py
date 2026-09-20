@@ -245,9 +245,9 @@ def main() -> None:
         raise SystemExit("usage: upgrade-shorts-metrics-v3.py INPUT [OUTPUT]")
     src = Path(sys.argv[1])
     dst = Path(sys.argv[2]) if len(sys.argv) == 3 else src
-    workflow = upgrade(json.loads(src.read_text()))
+    workflow = upgrade(json.loads(src.read_text(encoding="utf-8")))
     assert_applied(workflow)
-    dst.write_text(json.dumps(workflow, indent=2) + "\n")
+    dst.write_text(json.dumps(workflow, indent=2) + "\n", encoding="utf-8")
     print(f"{MARKER} workflow written to {dst}")
 
 

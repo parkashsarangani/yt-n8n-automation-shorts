@@ -260,7 +260,7 @@ def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit("usage: resolver_v5_runtime.py BROLL_RESOLVER_JS")
     path = Path(sys.argv[1])
-    text = upgrade(path.read_text())
+    text = upgrade(path.read_text(encoding="utf-8"))
     required = [MARKER, PUBLISH_MARKER, VIDEO_BUDGET_MARKER, STAGING_MARKER, EARLY_MARKER, "downloadVideoSample", "video_contact_sheet_ffmpeg_failed", "best_available_below_quality_target", "no_technically_usable_candidate"]
     missing = [x for x in required if x not in text]
     if missing:
@@ -271,7 +271,7 @@ def main() -> None:
         raise RuntimeError("semantic quality score can still hard-fail publication")
     if "annotation_plan" in text or "normalizeAnnotationPlan" in text:
         raise RuntimeError("legacy annotation geometry reintroduced")
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     print(f"{MARKER} written to {path}")
 
 

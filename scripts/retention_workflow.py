@@ -1,4 +1,11 @@
-"""Final retention layer, after growth/metrics transforms. No new upload gates."""
+"""Final retention layer, after growth/metrics transforms.
+
+Diagnostics stay advisory, with one deliberate, narrow exception: a hook that
+opens on an unambiguous generic phrase (did you know / in this video / a
+greeting) is promoted to a hard validator rejection - see HOOK_OPENING_GATE
+below. Everything else creativeDiagnostics computes remains advisory-only,
+same as before.
+"""
 import json
 import re
 from pathlib import Path
@@ -37,7 +44,7 @@ def upgrade(workflow, compose, root: Path):
     nodes = {n['name']: n for n in workflow['nodes']}
     if workflow.get('meta', {}).get('retention_policy') == MARKER:
         return compose
-    shared = (root / 'shorts-compose/retentionPolicy.js').read_text().split('module.exports=')[0]
+    shared = (root / 'shorts-compose/retentionPolicy.js').read_text(encoding="utf-8").split('module.exports=')[0]
     name = 'Plan Retention Experiment'
     workflow['nodes'].append({'id':'retention-experiment-plan-v1','name':name,'type':'n8n-nodes-base.code','typeVersion':2,'position':[nodes['Normalize Research Evidence']['position'][0]+160, nodes['Normalize Research Evidence']['position'][1]+160],
         'parameters':{'jsCode':shared+"\nreturn {json:{...$input.first().json,retention_experiment:assignHookExperiment(String($execution.id))}};"}})
@@ -53,11 +60,38 @@ def upgrade(workflow, compose, root: Path):
     for target in ['Claude: Visual Director','Claude: Repair Script']:
         append_prompt(nodes[target], DIRECTOR)
     validator = nodes['Validate Final Script']['parameters']
+    # HOOK_OPENING_GATE: the one advisory check unambiguous enough (regex-only,
+    # no judgment call) to promote to a hard rejection. Runs on the final hook
+    # (post hook-critic, if HOOK_CRITIC_V1 already ran), so a chosen candidate
+    # that is still a generic opener gets caught here rather than shipping.
+    hook_bounds_anchor = "if (!parsed.hook || parsed.hook.length < 5 || parsed.hook.length > 200) {\n  errors.push('hook missing or out of bounds (5-200 chars)');\n}\n"
+    if validator['jsCode'].count(hook_bounds_anchor) != 1:
+        raise ValueError('hook bounds validator anchor changed')
+    # creativeDiagnostics references RETENTION_POLICY (a const) - JS's
+    # temporal-dead-zone rules mean that const isn't usable before its own
+    # declaration line has executed, unlike a hoisted function declaration.
+    # So `shared` (the retentionPolicy.js source, including that const) has
+    # to be pasted in HERE, ahead of this earlier call site, not only at the
+    # later one below - which now just calls creativeDiagnostics without
+    # re-declaring it (redeclaring the same const twice would be a
+    # SyntaxError).
+    hook_opening_gate = (
+        shared + "\n"
+        "if (creativeDiagnostics(parsed).warnings.includes('generic_opening')) {\n"
+        "  errors.push('hook opens with a generic phrase (e.g. did you know, in this video, or a greeting) "
+        "instead of stating the surprising claim immediately');\n"
+        "}\n"
+    )
+    validator['jsCode'] = validator['jsCode'].replace(hook_bounds_anchor, hook_bounds_anchor + hook_opening_gate)
     anchor = 'return { json: { ...parsed, _scriptValid: true } };'
     if validator['jsCode'].count(anchor) != 1:
         raise ValueError('successful validator return anchor changed')
-    # Assignment is owned by the workflow, not the model. Diagnostics never reject.
-    validator['jsCode'] = validator['jsCode'].replace(anchor, shared + "\ntry { parsed.retention_experiment=$('Plan Retention Experiment').first().json.retention_experiment; } catch {}\nparsed.retention_diagnostics=creativeDiagnostics(parsed);\n" + anchor)
+    # Assignment is owned by the workflow, not the model. Diagnostics never
+    # reject here (the one exception, HOOK_OPENING_GATE, already ran earlier
+    # in this same function and pasted `shared` itself, so creativeDiagnostics
+    # is already declared - it is not re-pasted here to avoid a duplicate
+    # `const RETENTION_POLICY` SyntaxError).
+    validator['jsCode'] = validator['jsCode'].replace(anchor, "\ntry { parsed.retention_experiment=$('Plan Retention Experiment').first().json.retention_experiment; } catch {}\nparsed.retention_diagnostics=creativeDiagnostics(parsed);\n" + anchor)
     log = nodes['Log Published Video']['parameters']
     anchor = 'creative_dna: {'
     if log['jsonBody'].count(anchor) != 1:

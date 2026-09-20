@@ -355,7 +355,7 @@ def bind_analytics_credential(workflow: dict) -> None:
 
 
 def postprocess_workflow(path: Path) -> None:
-    workflow = json.loads(path.read_text())
+    workflow = json.loads(path.read_text(encoding="utf-8"))
     internalize_compose_service_urls(workflow)
     clean_visual_director_annotation_contract(workflow)
     enforce_real_media_mix(workflow)
@@ -371,7 +371,7 @@ def postprocess_workflow(path: Path) -> None:
         raise RuntimeError("not every routed LLM node got a bounded transport retry")
     workflow.setdefault("meta", {})["production_build_version"] = BUILD_VERSION
     workflow["meta"]["compose_service_transport"] = "docker_internal"
-    path.write_text(json.dumps(workflow, indent=2) + "\n")
+    path.write_text(json.dumps(workflow, indent=2) + "\n", encoding="utf-8")
 
 
 def build(root: Path, output: Path) -> dict:
@@ -402,7 +402,7 @@ def build(root: Path, output: Path) -> dict:
     run("scripts/resolver_v5_runtime.py", str(resolver_out), cwd=root)
     run("scripts/visual_matching_v4_compose.py", str(compose_out), cwd=root)
 
-    workflow = json.loads(workflow_out.read_text())
+    workflow = json.loads(workflow_out.read_text(encoding="utf-8"))
     tag_code = node_by_name(workflow, "Tag B-roll")["parameters"]["jsCode"]
     merge_code = node_by_name(workflow, "Merge By scene_index (not position)")["parameters"]["jsCode"]
     resolver_url = str(node_by_name(workflow, "Resolve B-roll")["parameters"].get("url", ""))
@@ -444,8 +444,8 @@ def build(root: Path, output: Path) -> dict:
     if routed_llm_nodes != int(workflow.get("meta", {}).get("llm_gateway_routed_nodes", -1)) or routed_llm_nodes < 1:
         raise RuntimeError("generated workflow LLM gateway routing count is inconsistent")
 
-    compose_text = compose_out.read_text()
-    resolver_text = resolver_out.read_text()
+    compose_text = compose_out.read_text(encoding="utf-8")
+    resolver_text = resolver_out.read_text(encoding="utf-8")
     for marker in ("VISUAL_MATCHING_V4_COMPOSE", "NON_BLOCKING_FINAL_QA", "PRODUCTION_BT709_RANGE_NORMALIZATION", "reviewFinalVideo"):
         if marker not in compose_text:
             raise RuntimeError(f"compose artifact missing {marker}")
@@ -469,7 +469,7 @@ def build(root: Path, output: Path) -> dict:
         "build_version": BUILD_VERSION,
         "artifacts": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in artifact_paths},
     }
-    (output / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    (output / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest
 
 

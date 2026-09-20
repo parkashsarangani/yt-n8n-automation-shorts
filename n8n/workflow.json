@@ -814,7 +814,7 @@
         "nodeCredentialType": "youTubeOAuth2Api",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ snippet: { videoId: ($('YouTube: Upload Draft').item.json.uploadId || $('YouTube: Upload Draft').item.json.id), topLevelComment: { snippet: { textOriginal: (($('Validate Final Script').item.json.comment_hook || 'Did this surprise you?') + '\\n\\n👇 Drop your answer below - and send this to someone who needs to see it.') } } } }) }}",
+        "jsonBody": "={{ JSON.stringify({ snippet: { videoId: ($('YouTube: Upload Draft').item.json.uploadId || $('YouTube: Upload Draft').item.json.id), topLevelComment: { snippet: { textOriginal: (($('Validate Final Script').item.json.comment_hook || 'Did this surprise you?') + '\\n\\n👇 Drop your answer below' + ($('Extract Generated Topic').item.json.send_to_person ? (' - and send this to ' + $('Extract Generated Topic').item.json.send_to_person + '.') : ' - and send this to someone who needs to see it.')) } } } }) }}",
         "options": {
           "timeout": 20000
         }
