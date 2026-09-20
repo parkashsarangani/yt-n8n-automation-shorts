@@ -116,7 +116,7 @@ def main() -> None:
     if len(sys.argv) not in (2, 3):
         raise SystemExit("usage: upgrade-compose-growth-v2.py INPUT [OUTPUT]")
     src = Path(sys.argv[1]); dst = Path(sys.argv[2]) if len(sys.argv) == 3 else src
-    out = upgrade(src.read_text())
+    out = upgrade(src.read_text(encoding="utf-8"))
     required = [
         MARKER,
         "TOPIC_HISTORY_MAX = Math.max(500",
@@ -133,7 +133,7 @@ def main() -> None:
             raise RuntimeError(f"growth compose invariant missing: {marker}")
     if "const TOPIC_HISTORY_MAX = 90;" in out:
         raise RuntimeError("90-topic history cap survived production transform")
-    dst.write_text(out)
+    dst.write_text(out, encoding="utf-8")
     print(f"{MARKER} compose written to {dst}")
 
 

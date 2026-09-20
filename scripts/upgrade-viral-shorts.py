@@ -196,9 +196,9 @@ def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit("usage: upgrade-viral-shorts.py INPUT_WORKFLOW OUTPUT_WORKFLOW")
     src, dst = map(Path, sys.argv[1:])
-    workflow = json.loads(src.read_text())
+    workflow = json.loads(src.read_text(encoding="utf-8"))
     upgraded = upgrade(workflow)
-    dst.write_text(json.dumps(upgraded, indent=2) + "\n")
+    dst.write_text(json.dumps(upgraded, indent=2) + "\n", encoding="utf-8")
     print(f"viral quality workflow written to {dst}")
 
 

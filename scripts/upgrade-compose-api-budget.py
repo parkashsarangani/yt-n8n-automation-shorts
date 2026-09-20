@@ -366,8 +366,8 @@ def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit("usage: upgrade-compose-api-budget.py COMPOSE_PATH BROLL_PATH")
     compose_path, broll_path = map(Path, sys.argv[1:])
-    compose_path.write_text(patch_compose(compose_path.read_text()))
-    broll_path.write_text(patch_broll(broll_path.read_text()))
+    compose_path.write_text(patch_compose(compose_path.read_text(encoding="utf-8")), encoding="utf-8")
+    broll_path.write_text(patch_broll(broll_path.read_text(encoding="utf-8")), encoding="utf-8")
     print(f"API budget compose written to {compose_path}")
     print(f"API budget b-roll written to {broll_path}")
 

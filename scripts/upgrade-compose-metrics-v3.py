@@ -34,10 +34,10 @@ def main() -> None:
         raise SystemExit("usage: upgrade-compose-metrics-v3.py INPUT [OUTPUT]")
     src = Path(sys.argv[1])
     dst = Path(sys.argv[2]) if len(sys.argv) == 3 else src
-    out = upgrade(src.read_text())
+    out = upgrade(src.read_text(encoding="utf-8"))
     if 'app.post("/performance/ingest-deep"' not in out:
         raise RuntimeError("deep-metrics endpoint missing from generated compose")
-    dst.write_text(out)
+    dst.write_text(out, encoding="utf-8")
     print(f"{MARKER} compose written to {dst}")
 
 

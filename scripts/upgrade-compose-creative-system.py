@@ -193,8 +193,8 @@ def main() -> None:
         raise SystemExit("usage: upgrade-compose-creative-system.py INPUT_COMPOSE [OUTPUT_COMPOSE]")
     src = Path(sys.argv[1])
     dst = Path(sys.argv[2]) if len(sys.argv) == 3 else src
-    upgraded = upgrade(src.read_text())
-    dst.write_text(upgraded)
+    upgraded = upgrade(src.read_text(encoding="utf-8"))
+    dst.write_text(upgraded, encoding="utf-8")
     print(f"creative system compose written to {dst}")
 
 

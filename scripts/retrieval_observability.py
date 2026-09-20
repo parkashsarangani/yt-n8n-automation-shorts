@@ -100,9 +100,9 @@ console.log('retrieval observability helper OK');
 
 
 def patch_file(path: Path) -> None:
-    text = patch_text(path.read_text())
+    text = patch_text(path.read_text(encoding="utf-8"))
     self_test(text)
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     p = subprocess.run(["node", "--check", str(path)], text=True, capture_output=True)
     if p.returncode != 0:
         raise RuntimeError("retrieval-observability b-roll syntax check failed:\n" + p.stdout + p.stderr)

@@ -37,7 +37,7 @@ def upgrade(workflow, compose, root: Path):
     nodes = {n['name']: n for n in workflow['nodes']}
     if workflow.get('meta', {}).get('retention_policy') == MARKER:
         return compose
-    shared = (root / 'shorts-compose/retentionPolicy.js').read_text().split('module.exports=')[0]
+    shared = (root / 'shorts-compose/retentionPolicy.js').read_text(encoding="utf-8").split('module.exports=')[0]
     name = 'Plan Retention Experiment'
     workflow['nodes'].append({'id':'retention-experiment-plan-v1','name':name,'type':'n8n-nodes-base.code','typeVersion':2,'position':[nodes['Normalize Research Evidence']['position'][0]+160, nodes['Normalize Research Evidence']['position'][1]+160],
         'parameters':{'jsCode':shared+"\nreturn {json:{...$input.first().json,retention_experiment:assignHookExperiment(String($execution.id))}};"}})

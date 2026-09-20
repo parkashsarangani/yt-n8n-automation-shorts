@@ -131,26 +131,26 @@ def build(root: Path, output: Path) -> dict:
     # The V5 postprocessor internalized service calls before this policy existed.
     # Growth adds /topic-dedup afterward, so internalize once more to preserve
     # the production Docker-network transport invariant.
-    workflow = json.loads(workflow_out.read_text())
-    compose_out.write_text(retention_workflow.upgrade(workflow, compose_out.read_text(), root))
-    retention_workflow.assert_applied(workflow, compose_out.read_text())
-    compose_out.write_text(coherence_contracts.apply(workflow, compose_out.read_text()))
+    workflow = json.loads(workflow_out.read_text(encoding="utf-8"))
+    compose_out.write_text(retention_workflow.upgrade(workflow, compose_out.read_text(encoding="utf-8"), root), encoding="utf-8")
+    retention_workflow.assert_applied(workflow, compose_out.read_text(encoding="utf-8"))
+    compose_out.write_text(coherence_contracts.apply(workflow, compose_out.read_text(encoding="utf-8")), encoding="utf-8")
     v5.internalize_compose_service_urls(workflow)
     workflow.setdefault("meta", {})["production_build_version"] = BUILD_VERSION
     workflow["meta"]["shorts_growth_policy"] = POLICY_VERSION
-    workflow_out.write_text(json.dumps(workflow, indent=2) + "\n")
+    workflow_out.write_text(json.dumps(workflow, indent=2) + "\n", encoding="utf-8")
 
     assert_growth_workflow(workflow)
-    assert_growth_compose(compose_out.read_text())
+    assert_growth_compose(compose_out.read_text(encoding="utf-8"))
 
     # Recheck inherited V5 invariants. Recommendation #12 is therefore enforced
     # structurally: this growth pass cannot quietly replace the B-roll/resolver
     # subsystem that was already validated by the retained builder.
-    resolver_text = resolver_out.read_text()
+    resolver_text = resolver_out.read_text(encoding="utf-8")
     for marker in ("RESOLVER_V5_RUNTIME", "V5_ALWAYS_PUBLISH_BEST_AVAILABLE", "best_available_below_quality_target"):
         if marker not in resolver_text:
             raise RuntimeError(f"V5 resolver invariant missing after growth build: {marker}")
-    compose_text = compose_out.read_text()
+    compose_text = compose_out.read_text(encoding="utf-8")
     for marker in ("VISUAL_MATCHING_V4_COMPOSE", "NON_BLOCKING_FINAL_QA", "PRODUCTION_BT709_RANGE_NORMALIZATION", "reviewFinalVideo"):
         if marker not in compose_text:
             raise RuntimeError(f"V5 compose invariant missing after growth build: {marker}")
@@ -161,7 +161,7 @@ def build(root: Path, output: Path) -> dict:
         "policy_version": POLICY_VERSION,
         "artifacts": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in artifact_paths},
     }
-    (output / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    (output / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest
 
 

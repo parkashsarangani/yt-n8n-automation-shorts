@@ -757,10 +757,10 @@ def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit("usage: upgrade-shorts-growth-v2.py INPUT_WORKFLOW OUTPUT_WORKFLOW")
     src, dst = map(Path, sys.argv[1:])
-    w = json.loads(src.read_text())
+    w = json.loads(src.read_text(encoding="utf-8"))
     out = upgrade(w)
     assert_invariants(out)
-    dst.write_text(json.dumps(out, indent=2) + "\n")
+    dst.write_text(json.dumps(out, indent=2) + "\n", encoding="utf-8")
     print(f"{MARKER} workflow written to {dst}")
 
 

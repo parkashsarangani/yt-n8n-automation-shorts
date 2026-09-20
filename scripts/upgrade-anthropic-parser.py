@@ -290,7 +290,7 @@ def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit("usage: upgrade-anthropic-parser.py INPUT_WORKFLOW OUTPUT_WORKFLOW")
     src, dst = map(Path, sys.argv[1:])
-    workflow = json.loads(src.read_text())
+    workflow = json.loads(src.read_text(encoding="utf-8"))
     upgraded = upgrade(workflow)
     names = {n.get("name"): n for n in upgraded.get("nodes", [])}
 
@@ -323,7 +323,7 @@ def main() -> None:
         raise RuntimeError("Resolve B-roll timeout is too short for its configured vision budget")
 
     assert_alignment(upgraded)
-    dst.write_text(json.dumps(upgraded, indent=2) + "\n")
+    dst.write_text(json.dumps(upgraded, indent=2) + "\n", encoding="utf-8")
     print(f"Anthropic/parser/runtime-hardened workflow written to {dst}")
 
 

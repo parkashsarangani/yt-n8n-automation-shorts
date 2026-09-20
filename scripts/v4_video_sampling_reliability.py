@@ -156,7 +156,7 @@ NEW_MATERIALIZE = r'''async function materializeVerifiedClip(candidate, verifica
 
 
 def patch_file(path: Path) -> None:
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     if MARKER in text:
         return
     for anchor, label in [
@@ -169,7 +169,7 @@ def patch_file(path: Path) -> None:
     text = text.replace(OLD_BLOCK, NEW_BLOCK, 1)
     text = text.replace(OLD_VERIFY, NEW_VERIFY, 1)
     text = text.replace(OLD_MATERIALIZE, NEW_MATERIALIZE, 1)
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
 
 
 if __name__ == "__main__":

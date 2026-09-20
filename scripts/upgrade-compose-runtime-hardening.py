@@ -39,7 +39,7 @@ def _replace_once(text: str, old: str, new: str, label: str) -> str:
 def _patch_compose_bt709_range(compose_path: Path) -> None:
     if not compose_path.exists():
         return
-    text = compose_path.read_text()
+    text = compose_path.read_text(encoding="utf-8")
     if BT709_RANGE_MARKER in text:
         return
 
@@ -71,7 +71,7 @@ def _patch_compose_bt709_range(compose_path: Path) -> None:
         f"    // {BT709_RANGE_MARKER}: normalize full-range Remotion frames to limited-range BT.709.\n" + marker_anchor,
         1,
     )
-    compose_path.write_text(text)
+    compose_path.write_text(text, encoding="utf-8")
 
 
 def _patch_v4_budget_reliability(path: Path) -> None:
@@ -90,7 +90,7 @@ def _patch_v4_budget_reliability(path: Path) -> None:
     in CLIP-ranked order; the semantic/entity/action/relationship gates remain
     unchanged and fail closed.
     """
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     if all(marker in text for marker in [V4_BUDGET_MARKER, V4_EARLY_ACCEPT_MARKER, V4_MEDIA_TYPE_MARKER, V4_VIDEO_BUDGET_MARKER]):
         return
 
@@ -131,7 +131,7 @@ def _patch_v4_budget_reliability(path: Path) -> None:
     new_success = '    actual_video_verified: best.type === "video", library_hit: best.library_hit === true, vision_call_limit: state.scene_budget.limit, early_accept: state.early_accept, recommended_visual_proof_mode: contract.visual_proof_mode, visual_contract: contract, ...budget,'
     text = _replace_once(text, old_success, new_success, "budget success telemetry")
 
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
 
 
 def _patch_v4_template_fallback(path: Path) -> None:
@@ -154,7 +154,7 @@ def _patch_v4_template_fallback(path: Path) -> None:
     when the model supplied one and its own data actually satisfies that
     template's fields; only then fall through to a hard failure.
     """
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     if V4_TEMPLATE_FALLBACK_MARKER in text:
         return
 
@@ -205,11 +205,11 @@ function templateFallbackResult(tf, reason, runId, sceneIndex, firstFrame, plann
         raise RuntimeError("V4 template fallback: resolveBroll anchor missing")
     text = text.replace(anchor, helper + "\n" + anchor, 1)
 
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
 
 
 def _validate_v4(path: Path) -> None:
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     required = [
         V4_MARKER,
         "API_BUDGET",
@@ -248,7 +248,7 @@ def _validate_v4(path: Path) -> None:
 
 
 def upgrade(path: Path) -> None:
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     compose_path = path.with_name("compose.js")
     _patch_compose_bt709_range(compose_path)
 

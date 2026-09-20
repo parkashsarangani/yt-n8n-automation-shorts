@@ -56,7 +56,7 @@ def forbid(text: str, markers: list[str], label: str) -> None:
 
 
 def audit_workflow(path: Path) -> None:
-    workflow = json.loads(path.read_text())
+    workflow = json.loads(path.read_text(encoding="utf-8"))
     meta = workflow.get("meta", {})
     if meta.get("visual_matching_version") != "4":
         die("generated workflow lost visual_matching_version=4 contract")
@@ -145,7 +145,7 @@ def audit_workflow(path: Path) -> None:
 
 
 def audit_resolver(path: Path) -> None:
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     require(text, [
         "VISUAL_MATCHING_V4", "RETRIEVAL_RECALL_PHASE2", "SOURCE_QUERY_COMPILER_V1",
         "MULTIFRAME_VIDEO_RERANK_V1", "localSemanticRerank", "diversifyCandidates",
@@ -167,7 +167,7 @@ def audit_resolver(path: Path) -> None:
 
 
 def audit_compose(path: Path) -> None:
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     require(text, [
         "VISUAL_MATCHING_V4_COMPOSE", "reviewFinalVideo", "NON_BLOCKING_FINAL_QA",
         "publishing anyway", "PRODUCTION_BT709_RANGE_NORMALIZATION", '"-color_range", "tv"',
@@ -180,8 +180,8 @@ def audit_compose(path: Path) -> None:
 def audit_llm_runtime() -> None:
     routing_path = ROOT / "shorts-compose/llmRouting.js"
     gateway_path = ROOT / "shorts-compose/llmGateway.js"
-    routing = routing_path.read_text()
-    gateway = gateway_path.read_text()
+    routing = routing_path.read_text(encoding="utf-8")
+    gateway = gateway_path.read_text(encoding="utf-8")
 
     require(routing, [
         "LLM_ROUTER_MODE", "freellmapi", "LLM_ROUTER_FAIL_OPEN_TO_DIRECT",
@@ -204,7 +204,7 @@ def audit_llm_runtime() -> None:
     for path in (ROOT / "shorts-compose").rglob("*.js"):
         if "node_modules" in path.parts or path.name == "llmRouting.js":
             continue
-        text = path.read_text(errors="ignore")
+        text = path.read_text(errors="ignore", encoding="utf-8")
         if not any(host in text for host in DIRECT_PROVIDER_HOSTS):
             continue
         if 'require("axios")' not in text and "require('axios')" not in text:
@@ -212,7 +212,7 @@ def audit_llm_runtime() -> None:
 
 
 def audit_static_runtime() -> None:
-    budget = (ROOT / "shorts-compose/visualBudget.js").read_text()
+    budget = (ROOT / "shorts-compose/visualBudget.js").read_text(encoding="utf-8")
     require(budget, [
         "BROLL_RUN_MAX_VISION_CALLS || 28", "BROLL_BUDGET_STATE_PATH",
         "STATE_PATH", "acquireLock", "writeState", "durable_state: true",
@@ -220,21 +220,21 @@ def audit_static_runtime() -> None:
     forbid(budget, ["const runBudgets = new Map()", "const resultCache = new Map()"], "durable visual budget")
     run(["node", "--check", str(ROOT / "shorts-compose/visualBudget.js")])
 
-    final_qa = (ROOT / "shorts-compose/finalVisualQa.js").read_text()
+    final_qa = (ROOT / "shorts-compose/finalVisualQa.js").read_text(encoding="utf-8")
     require(final_qa, [
         "debug_artifact", "critical_content_clipped", "editorial_cleanliness",
         "safe_area", "caption_integrity", "hard_failed", "hard_issues", "soft_issues",
     ], "final rendered QA telemetry")
     run(["node", "--check", str(ROOT / "shorts-compose/finalVisualQa.js")])
 
-    annotated = (ROOT / "shorts-compose/remotion/src/compositions/AnnotatedReal.tsx").read_text()
+    annotated = (ROOT / "shorts-compose/remotion/src/compositions/AnnotatedReal.tsx").read_text(encoding="utf-8")
     forbid(annotated, [
         "Callouts are positioned from visual verification", "annotations.slice", "annotations.map",
         "<line", "<circle", "{a.label}",
     ], "AnnotatedReal audience renderer")
     require(annotated, ['objectFit: "contain"', "must never leak into the final Short"], "AnnotatedReal audience renderer")
 
-    dc = (ROOT / "docker-compose.yml").read_text()
+    dc = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
     require(dc, [
         "BROLL_BUDGET_STATE_PATH=${BROLL_BUDGET_STATE_PATH:-/app/data/visual_budget_state.json}",
         "BROLL_RESOLVE_DEADLINE_MS=${BROLL_RESOLVE_DEADLINE_MS:-135000}",
@@ -257,8 +257,8 @@ def audit_static_runtime() -> None:
 
 
 def audit_build_wiring() -> None:
-    quality = (ROOT / ".github/workflows/quality-check.yml").read_text()
-    deploy = (ROOT / ".github/workflows/deploy.yml").read_text()
+    quality = (ROOT / ".github/workflows/quality-check.yml").read_text(encoding="utf-8")
+    deploy = (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
     for text, label in [(quality, "quality CI"), (deploy, "deploy")]:
         require(text, ["scripts/build_production_artifacts.py"], label)
     if "upgrade-compose-runtime-hardening.py" in quality or "upgrade-compose-runtime-hardening.py" in deploy:
@@ -280,7 +280,7 @@ def audit() -> None:
     with tempfile.TemporaryDirectory(prefix="shorts-preprod-v5-") as td:
         out = Path(td) / "production"
         run([sys.executable, str(ROOT / "scripts/build_production_artifacts.py"), "--output-dir", str(out)])
-        manifest = json.loads((out / "manifest.json").read_text())
+        manifest = json.loads((out / "manifest.json").read_text(encoding="utf-8"))
         if manifest.get("build_version") != "5" or set(manifest.get("artifacts", {})) != {"workflow.json", "compose.js", "brollResolver.js"}:
             die(f"invalid production artifact manifest: {manifest}")
         audit_workflow(out / "workflow.json")
