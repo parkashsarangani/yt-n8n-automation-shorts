@@ -52,6 +52,27 @@ test('publication checkpoint precedes optional updates and cleanup has an implem
  assert.equal((compose.match(/app.post\("\/performance\/log"/g)||[]).length,1);
  assert.ok(compose.includes('installLifecycle'));assert.ok(!compose.includes('jobStore.delete(req.params.jobId)'));
 });
+test('first-comment share CTA names the specific recipient when the topic stage provided one, else falls back to the generic ask',()=>{
+ const body=n['Post First Comment'].parameters.jsonBody;
+ const stripped=body.replace(/^=\{\{/,'').replace(/\}\}$/,'');
+ assert.doesNotThrow(()=>new Function('$',stripped));
+ const mk=(json)=>({item:{json},first:()=>({json})});
+ const evalWith=(sendToPerson)=>{
+  const $=(key)=>{
+   if(key==='YouTube: Upload Draft')return mk({uploadId:'vid123'});
+   if(key==='Merge By scene_index (not position)')return mk({script_snapshot:{comment_hook:'Would you have guessed this? Yes or no?'}});
+   if(key==='Extract Generated Topic')return mk({send_to_person:sendToPerson});
+   return mk({});
+  };
+  const fn=new Function('$','return '+stripped.replace(/^=/,''));
+  return JSON.parse(fn($)).snippet.topLevelComment.snippet.textOriginal;
+ };
+ const named=evalWith('the friend who never believes wild facts');
+ assert.match(named,/send this to the friend who never believes wild facts\./);
+ assert.doesNotMatch(named,/someone who needs to see it/);
+ const fallback=evalWith('');
+ assert.match(fallback,/send this to someone who needs to see it\./);
+});
 test('source cap retains exact Wikipedia hit and every populated provider',()=>{
  const {balancedPool}=require('../sourcePool');const sources=['pexels','pexels_video','pixabay','pixabay_video','unsplash','wikimedia','openverse','nasa'];
  const groups=sources.map(s=>Array.from({length:12},(_,i)=>({source:s,url:`https://example.invalid/${s}/${i}`})));
