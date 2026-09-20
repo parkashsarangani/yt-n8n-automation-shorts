@@ -116,6 +116,18 @@ test('durable completion survives restart and cleanup refuses arbitrary paths',a
   assert.equal((await fetch(url+'/compose',{method:'POST'})).status,503);
  }finally{clearInterval(jobs.timer);clearInterval(restored.timer);await new Promise(r=>server.close(r));}
 });
+test('writer prompt lifts the hype-word ban but keeps the fact-accuracy hard line intact',()=>{
+ const body=n['Claude: Draft Script (Stage 1)'].parameters.jsonBody;
+ assert.ok(!body.includes('Generic hype words are also banned'),'old blanket hype-word ban must be gone');
+ assert.ok(!body.includes('the hype words are banned and saying them out loud'),'old MAKE IT FEEL IMPOSSIBLE ban must be gone');
+ assert.match(body,/Hype words are now a deliberate tool, not banned/);
+ assert.match(body,/HYPE IS A GOAL, NOT A RISK/);
+ assert.match(body,/Engineer the collision first so their brain already thinks/);
+ // The one non-negotiable limit must survive every edit to this prompt.
+ assert.match(body,/never invent a fact, statistic, or event that is not real/);
+ const stripped=body.replace(/^=\{\{/,'').replace(/\}\}$/,'');
+ assert.doesNotThrow(()=>new Function('$',stripped));
+});
 test('published creative DNA captures hook_type and hook_candidates from the accepted script',()=>{
  const body=n['Log Published Video'].parameters.jsonBody;
  assert.match(body,/concept_archetype:.*hook_type: \$\('Merge By scene_index \(not position\)'\)\.first\(\)\.json\.script_snapshot\.hook_type \|\| null/);
