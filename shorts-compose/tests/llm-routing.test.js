@@ -140,3 +140,52 @@ test("preloaded axios interceptor really rewrites an existing direct OpenAI call
     : observed.headers?.Authorization;
   assert.equal(authorization, "Bearer freellmapi-test-key");
 });
+
+// FREE_JSON_CONTRACT: a 200 from FreeLLMAPI with the wrong JSON shape must
+// reach the paid fail-open path instead of being returned as a success.
+function chatReply(content) {
+  return { data: { choices: [{ message: { content }, finish_reason: "stop" }] }, status: 200, headers: {} };
+}
+async function routeWithFreeReply(content, body, requiredJsonKeys) {
+  const routes = [];
+  const result = await routing.requestViaRouter("chat", body, {
+    timeout: 1000,
+    requiredJsonKeys,
+    adapter: async (config) => {
+      routes.push(config.__llmRoute);
+      assert.equal(config.requiredJsonKeys, undefined, "gateway-only option must not reach axios");
+      return { ...(config.__llmRoute === "freellmapi" ? chatReply(content) : chatReply('{"hook":"paid","scenes":[]}')), config };
+    },
+  });
+  return { result, routes };
+}
+
+test("free answer missing required keys falls back to the paid provider", async () => {
+  const { result, routes } = await routeWithFreeReply('{"title":"no hook or scenes"}', { model: "m", messages: [] }, ["hook", "scenes"]);
+  assert.deepEqual(routes, ["freellmapi", "direct"]);
+  assert.equal(result.fallback, true);
+  assert.match(result.free_error, /missing required keys: hook,scenes/);
+  assert.equal(result.response.data.choices[0].message.content, '{"hook":"paid","scenes":[]}');
+});
+
+test("JSON-mode free answer that is not JSON falls back to the paid provider", async () => {
+  const body = { model: "m", response_format: { type: "json_object" }, messages: [] };
+  const { result, routes } = await routeWithFreeReply("Sorry, I cannot help with that.", body);
+  assert.deepEqual(routes, ["freellmapi", "direct"]);
+  assert.match(result.free_error, /not a JSON object/);
+});
+
+test("usable free JSON (fenced or with a preface) stays on the free route", async () => {
+  const body = { model: "m", response_format: { type: "json_object" }, messages: [] };
+  for (const content of ['```json\n{"hook":"h","scenes":[]}\n```', 'Here you go: {"hook":"h","scenes":[{"a":"}"}]}', '"hook":"h","scenes":[]}']) {
+    const { result, routes } = await routeWithFreeReply(content, body, ["hook", "scenes"]);
+    assert.deepEqual(routes, ["freellmapi"]);
+    assert.equal(result.fallback, false);
+  }
+});
+
+test("plain-text requests without a JSON contract are never second-guessed", async () => {
+  const { routes } = await routeWithFreeReply("just prose", { model: "m", messages: [] });
+  assert.deepEqual(routes, ["freellmapi"]);
+  assert.equal(routing.freeJsonProblem("messages", { response_format: { type: "json_object" } }, {}), null);
+});

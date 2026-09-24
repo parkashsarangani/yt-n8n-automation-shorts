@@ -28,6 +28,17 @@ function safeUpstreamHeaders(req) {
   return out;
 }
 
+// Callers may name top-level JSON keys a usable answer must contain; a free
+// answer without them falls back to the paid provider (see llmRouting.js).
+// Consumed here, never forwarded upstream.
+function requiredJsonKeys(req) {
+  return String(req.get("x-llm-required-keys") || "")
+    .split(",")
+    .map((key) => key.trim())
+    .filter((key) => /^[A-Za-z0-9_]{1,64}$/.test(key))
+    .slice(0, 16);
+}
+
 async function proxy(surface, req, res) {
   const controller=new AbortController();
   const cancel=()=>{if(!res.writableEnded)controller.abort();};
@@ -37,6 +48,7 @@ async function proxy(surface, req, res) {
       timeout: Number(req.get("x-llm-timeout-ms") || process.env.LLM_ROUTER_TIMEOUT_MS || 120000),
       headers: safeUpstreamHeaders(req),
       signal: controller.signal,
+      requiredJsonKeys: requiredJsonKeys(req),
     });
     const upstream = result.response;
     res.set("X-LLM-Route", result.route);
@@ -79,4 +91,4 @@ app.listen(port, "0.0.0.0", () => {
   console.log(`[llm-gateway] listening on :${port} mode=${routingStatus().mode}`);
 });
 
-module.exports = { safeUpstreamHeaders };
+module.exports = { safeUpstreamHeaders, requiredJsonKeys };
