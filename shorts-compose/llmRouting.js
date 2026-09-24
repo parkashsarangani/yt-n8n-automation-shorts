@@ -131,6 +131,55 @@ function makeDirectRequest(surface, body, config = {}) {
   };
 }
 
+// FREE_JSON_CONTRACT: FreeLLMAPI can answer HTTP 200 with JSON of the wrong
+// shape (2026-09-24 12:00 run: Stage 1 draft without hook/scenes). For JSON-mode
+// chat requests, and for callers naming x-llm-required-keys, treat that as a free
+// failure so the existing paid fail-open path gets one chance to answer instead.
+function lastJsonObject(text) {
+  const value = String(text || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+  } catch {}
+  let found;
+  for (let start = value.indexOf("{"); start >= 0;) {
+    let depth = 0, inStr = false, esc = false, next = start + 1;
+    for (let i = start; i < value.length; i++) {
+      const ch = value[i];
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === "\\") esc = true;
+        else if (ch === '"') inStr = false;
+      } else if (ch === '"') inStr = true;
+      else if (ch === "{") depth += 1;
+      else if (ch === "}" && --depth === 0) {
+        try {
+          const parsed = JSON.parse(value.slice(start, i + 1));
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) found = parsed;
+        } catch {}
+        next = i + 1;
+        break;
+      }
+    }
+    start = value.indexOf("{", next);
+  }
+  return found;
+}
+
+function freeJsonProblem(surface, body, data, requiredKeys = []) {
+  if (surface !== "chat") return null;
+  const format = body?.response_format?.type;
+  const wantsJson = format === "json_object" || format === "json_schema";
+  if (!wantsJson && !requiredKeys.length) return null;
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || !content.trim()) return "empty message content";
+  // Mirror the n8n parsers, which also accept a reply missing its leading "{".
+  const parsed = lastJsonObject(content) || lastJsonObject(`{${content}`);
+  if (!parsed) return "message content is not a JSON object";
+  const missing = requiredKeys.filter((key) => !Object.prototype.hasOwnProperty.call(parsed, key));
+  return missing.length ? `JSON missing required keys: ${missing.join(",")}` : null;
+}
+
 async function requestViaRouter(surface, body, config = {}) {
   const deadline = Date.now() + Number(config.timeout || REQUEST_TIMEOUT_MS);
   const remaining = () => {
@@ -138,16 +187,21 @@ async function requestViaRouter(surface, body, config = {}) {
     const ms=deadline-Date.now(); if(ms<=0)throw new Error('LLM request deadline exceeded'); return ms;
   };
   if (!isFreeMode()) {
-    const response = await rawAxios.request(makeDirectRequest(surface, body, config));
+    const {requiredJsonKeys, ...requestConfig} = config;
+    const response = await rawAxios.request(makeDirectRequest(surface, body, requestConfig));
     return { response, route: "direct", fallback: false };
   }
 
   try {
-    const response = await rawAxios.request(makeFreeRequest(surface, body, {...config, timeout: Math.max(1,Math.floor(remaining()*0.55))}));
+    const {requiredJsonKeys, ...requestConfig} = config;
+    const response = await rawAxios.request(makeFreeRequest(surface, body, {...requestConfig, timeout: Math.max(1,Math.floor(remaining()*0.55))}));
+    const problem = FAIL_OPEN_TO_DIRECT ? freeJsonProblem(surface, body, response?.data, requiredJsonKeys || []) : null;
+    if (problem) throw new Error(`FreeLLMAPI returned unusable JSON: ${problem}`);
     return { response, route: "freellmapi", fallback: false };
   } catch (freeError) {
     if (!FAIL_OPEN_TO_DIRECT) throw freeError;
-    const response = await rawAxios.request(makeDirectRequest(surface, body, {...config, timeout:remaining()}));
+    const {requiredJsonKeys, ...requestConfig} = config;
+    const response = await rawAxios.request(makeDirectRequest(surface, body, {...requestConfig, timeout:remaining()}));
     return { response, route: "direct", fallback: true, free_error: String(freeError?.message || freeError).slice(0, 500) };
   }
 }
@@ -238,6 +292,7 @@ module.exports = {
   directTarget,
   makeFreeRequest,
   makeDirectRequest,
+  freeJsonProblem,
   requestViaRouter,
   installAxiosRouting,
   routingStatus,

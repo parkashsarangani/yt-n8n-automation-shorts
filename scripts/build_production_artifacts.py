@@ -21,6 +21,7 @@ from pathlib import Path
 import build_production_artifacts_v5 as v5
 import retention_workflow
 import coherence_contracts
+import draft_resilience
 
 BUILD_VERSION = "5"
 POLICY_VERSION = "shorts-growth-v2"
@@ -140,6 +141,10 @@ def build(root: Path, output: Path) -> dict:
     compose_out.write_text(retention_workflow.upgrade(workflow, compose_out.read_text(encoding="utf-8"), root), encoding="utf-8")
     retention_workflow.assert_applied(workflow, compose_out.read_text(encoding="utf-8"))
     compose_out.write_text(coherence_contracts.apply(workflow, compose_out.read_text(encoding="utf-8")), encoding="utf-8")
+    # Last workflow transform: the Stage 1 retry loop must feed the writer's
+    # final upstream node, after retention_workflow has inserted its planner.
+    draft_resilience.upgrade(workflow)
+    draft_resilience.assert_invariants(workflow)
     v5.internalize_compose_service_urls(workflow)
     workflow.setdefault("meta", {})["production_build_version"] = BUILD_VERSION
     workflow["meta"]["shorts_growth_policy"] = POLICY_VERSION

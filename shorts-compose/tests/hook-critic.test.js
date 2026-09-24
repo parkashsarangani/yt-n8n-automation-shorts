@@ -28,7 +28,9 @@ function run(name, data, prior = {}, id = '42') {
 }
 
 test('hook critic node exists and is wired between Parse Draft JSON and Claude: Visual Director', () => {
-  assert.equal(w.connections['Parse Draft JSON'].main[0][0].node, 'Claude: Critique Hooks');
+  // DRAFT_RETRY_LOOP gates the critic on a usable draft (true branch).
+  assert.equal(w.connections['Parse Draft JSON'].main[0][0].node, 'If Draft Parsed');
+  assert.equal(w.connections['If Draft Parsed'].main[0][0].node, 'Claude: Critique Hooks');
   assert.equal(w.connections['Claude: Critique Hooks'].main[0][0].node, 'Apply Hook Critique');
   assert.equal(w.connections['Apply Hook Critique'].main[0][0].node, 'Claude: Visual Director');
 });
