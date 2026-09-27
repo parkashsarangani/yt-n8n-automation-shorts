@@ -25,6 +25,25 @@ test('canonical identity and intended strategy survive commissioning',()=>{
  assert.equal(picked.canonical_key,c[0].canonical_key);assert.equal(picked.strategy_arm,'explore');
  assert.throws(()=>run('Extract Generated Topic',response,{...prior,'Deduplicate Topic Pool':{shortlist:[]}}),/approved/);
 });
+test('topic parsers accept a bare-array answer instead of discarding it (execution 1006)',()=>{
+ // Free-first routing landed on a model that ignored json_object and answered
+ // with a bare array; the old parser replaced ten real topics with a stale,
+ // fully-published fallback list and the run died at topic dedup.
+ const c=Array.from({length:10},(_,i)=>({topic:`Distinct fact ${i} about a different subject`,score:100-i,strategy_arm:'exploit',canonical_key:`s${i}|m|p`}));
+ for(const content of [JSON.stringify(c),'```json\n'+JSON.stringify(c,null,2)+'\n```',JSON.stringify({topics:c})]){
+  const response={choices:[{message:{content},finish_reason:'stop'}]};
+  const pool=run('Parse Topic Pool',response);
+  assert.equal(pool.pool.length,10);assert.equal(pool.pool[0].topic,c[0].topic);
+  assert.ok(!n['Parse Topic Pool'].parameters.jsCode.includes('evergreen fallback'));
+  const picked=run('Extract Generated Topic',response,{'Parse Topic Pool':pool,'Ensure Topics Array':{topics:[]},'Deduplicate Topic Pool':{shortlist:c}});
+  assert.equal(picked.topic,c[0].topic);
+ }
+});
+test('an unparseable topic answer fails loudly instead of substituting a hard-coded pool',()=>{
+ const response=content=>({choices:[{message:{content},finish_reason:'stop'}]});
+ assert.throws(()=>run('Parse Topic Pool',response('Sorry, I cannot help with that.')),/no parseable candidate list/);
+ assert.throws(()=>run('Parse Topic Pool',response(JSON.stringify({candidates:[{topic:'Only one usable topic here'}]}))),/only 1 usable candidates/);
+});
 test('topic generation prompt references measured archetype performance, not only the static seed list',()=>{
  const body=n['Claude: Generate Topic'].parameters.jsonBody;
  assert.match(body,/MEASURED ARCHETYPE PERFORMANCE.*JSON\.stringify\(\$\('Get Channel Insights'\)\.item\.json\.archetype_performance \|\| \{\}\)/);
