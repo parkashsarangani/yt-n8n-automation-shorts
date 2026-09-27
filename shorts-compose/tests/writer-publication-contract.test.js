@@ -103,6 +103,41 @@ function validatePartial(partial, draft, state={}) {
   return new Function('$input','$','$execution','$getWorkflowStaticData',code('Validate Final Script'))({first:()=>({json:wrapped(partial)})},lookup,{id:'contract'},()=>state).json;
 }
 
+function topicDriftErrors(script, topicItem) {
+  const lookup = name => {
+    if(name==='Parse Draft JSON') return {first:()=>({json:{draft:script}}),item:{json:{draft:script}}};
+    if(name==='Extract Generated Topic') return {item:{json:topicItem}};
+    return {first:()=>({json:{}}),item:{json:{}}};
+  };
+  const result = new Function('$input','$','$execution','$getWorkflowStaticData',code('Validate Final Script'))({first:()=>({json:wrapped(script)})},lookup,{id:'topic-drift'},()=>({})).json;
+  return (result._validationErrors||[]).filter(e=>e.includes('different topic than the one selected'));
+}
+// Execution 1005: the topic sentence's only long words were "damaged" and
+// "covered"; an on-topic script that said "destroy" was rejected three times.
+const qrTopic = {topic:'A QR code can still work even when up to 30% of it is damaged or covered.',subject_key:'QR codes',mechanism_key:'error correction',research_query:'QR code error correction 30 percent'};
+function qrScript(narrations) {
+  const script=draftFixture();
+  script.title='The Hidden Superpower Inside QR Codes';
+  script.hook='How much of a QR code can you completely destroy before it stops working?';
+  script.scenes.forEach((s,i)=>{s.narration=narrations[i];});
+  return script;
+}
+
+test('an on-topic script that paraphrases the topic sentence is not flagged as topic drift', {skip:skipReason}, () => {
+  const script=qrScript(['Rip away almost a third of this pattern and your phone still reads it instantly.','The squares hide spare copies of the data using Reed-Solomon math.','So a scratched, muddy sticker on a ticket still scans at the gate.']);
+  assert.deepEqual(topicDriftErrors(script,qrTopic),[]);
+  // Topic sentence alone, no structured keys: "QR codes" in the title still matches "QR code".
+  assert.deepEqual(topicDriftErrors(script,{topic:'QR codes survive heavy damage'}),[]);
+});
+
+test('a script rewritten about a different subject is still flagged as topic drift', {skip:skipReason}, () => {
+  const script=draftFixture();
+  script.title='Why Windshields Have Tiny Black Dots';
+  script.hook='Those black dots on your windshield are doing a secret job.';
+  script.scenes.forEach((s,i)=>{s.narration=['The ceramic frit band spreads heat evenly across the glass edge.','It also gives the urethane glue a rough surface to grip.','And it hides the adhesive line from sunlight so it lasts longer.'][i];});
+  assert.equal(topicDriftErrors(script,qrTopic).length,1);
+});
+
 test('partial director output recovers empty/absent scenes and keeps indexed patches on their own scenes', {skip:skipReason}, () => {
   const draft=draftFixture();
   for(const partial of [{creative_format:'documentary_cinematic'}, {hook:draft.hook, scenes:[]}, {hook:draft.hook,scenes:[{scene_index:2,visual_claim:'ONLY THIRD SCENE'}]}]) {
