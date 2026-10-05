@@ -73,6 +73,7 @@ services:
     environment:
       - OUTPUT_DIR=/app/outputs
       - TOPIC_HISTORY_PATH=/app/data/topic_history.json
+      - CHANNEL_NICHE=social_psychology_v1
       # Preload the routing shim so existing internal OpenAI/VLM calls are
       # intercepted centrally without invasive rewrites in each module.
       - NODE_OPTIONS=--max-old-space-size=4096 --require=/app/llmRouting.js

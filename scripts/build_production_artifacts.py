@@ -22,6 +22,7 @@ import build_production_artifacts_v5 as v5
 import retention_workflow
 import coherence_contracts
 import draft_resilience
+import niche_social_psychology
 
 BUILD_VERSION = "5"
 POLICY_VERSION = "shorts-growth-v2"
@@ -145,6 +146,11 @@ def build(root: Path, output: Path) -> dict:
     # final upstream node, after retention_workflow has inserted its planner.
     draft_resilience.upgrade(workflow)
     draft_resilience.assert_invariants(workflow)
+    # Channel niche is the last prompt transform: it swaps only the
+    # niche-specific passages every earlier layer wrote for the trivia channel
+    # and adds the promise-payoff gate, keeping all their contracts intact.
+    niche_social_psychology.apply(workflow)
+    niche_social_psychology.assert_applied(workflow)
     v5.internalize_compose_service_urls(workflow)
     workflow.setdefault("meta", {})["production_build_version"] = BUILD_VERSION
     workflow["meta"]["shorts_growth_policy"] = POLICY_VERSION

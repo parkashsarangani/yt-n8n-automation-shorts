@@ -19,6 +19,15 @@ const PERF_PATH = path.join(DATA_DIR, "performance_history.json");
 const INSIGHTS_PATH = path.join(DATA_DIR, "channel_insights.json");
 const PERF_MAX = Math.max(500, Number(process.env.PERF_HISTORY_MAX || 500));
 const POLICY_VERSION = process.env.SHORTS_POLICY_VERSION || "shorts-growth-v2";
+// When the channel changes niche, results from the old niche must not steer
+// topic choice. Set CHANNEL_NICHE to learn only from videos tagged with it;
+// unset keeps every video (all history predates niche tagging).
+const CHANNEL_NICHE = process.env.CHANNEL_NICHE || null;
+
+function currentNicheHistory(history) {
+  if (!CHANNEL_NICHE) return history;
+  return history.filter((h) => h && h.creative_dna && h.creative_dna.niche === CHANNEL_NICHE);
+}
 
 const OPENAI_KEY = process.env.OPENAI_KEY || "";
 const STRATEGIST_MODEL = process.env.STRATEGIST_MODEL || "gpt-5.6-luna";
@@ -64,6 +73,7 @@ function normalizeCreativeDna(entry = {}) {
     retention_diagnostics: dna.retention_diagnostics || null,
     rendered_timing: dna.rendered_timing || null,
     policy_version: dna.policy_version || entry.policy_version || POLICY_VERSION,
+    niche: dna.niche || entry.niche || null,
     topic_strategy_arm: dna.topic_strategy_arm || entry.topic_strategy_arm || null,
     topic_predicted_score: numOrNull(dna.topic_predicted_score ?? entry.topic_predicted_score),
     canonical_key: dna.canonical_key || entry.canonical_key || null,
@@ -460,7 +470,7 @@ async function callStrategist(cohort, correction) {
 }
 
 async function runStrategist(history) {
-  const cohort = selectStrategistCohort(history);
+  const cohort = selectStrategistCohort(currentNicheHistory(history));
   if (!cohort.count) {
     const empty = {
       sample_size: 0,
@@ -473,6 +483,7 @@ async function runStrategist(history) {
       measured_count: 0,
       cohort_counts: cohort.counts,
       policy_version: POLICY_VERSION,
+      niche: CHANNEL_NICHE,
     };
     await writeJson(INSIGHTS_PATH, empty);
     return empty;
@@ -501,6 +512,7 @@ async function runStrategist(history) {
   insights.cohort = cohort.key;
   insights.cohort_counts = cohort.counts;
   insights.policy_version = POLICY_VERSION;
+  insights.niche = CHANNEL_NICHE;
   await writeJson(INSIGHTS_PATH, insights);
   return insights;
 }
@@ -616,8 +628,13 @@ async function getInsights() {
   if (insights.measurement_policy !== retentionPolicy.RETENTION_POLICY) {
     insights = {sample_size:0,cohort:null,guidance:[],avoid:[],experiments:[],confidence_note:'Waiting for guidance generated under corrected metric definitions.'};
   }
-  const history = await readJson(PERF_PATH, []);
-  return {...insights, measurement_policy:retentionPolicy.RETENTION_POLICY,
+  // Guidance written while the channel was in a different niche is about the
+  // wrong content entirely; never feed it to the writers.
+  if (CHANNEL_NICHE && insights.niche !== CHANNEL_NICHE) {
+    insights = {sample_size:0,cohort:null,guidance:[],avoid:[],experiments:[],confidence_note:'Waiting for guidance measured on the current channel niche.'};
+  }
+  const history = currentNicheHistory(await readJson(PERF_PATH, []));
+  return {...insights, measurement_policy:retentionPolicy.RETENTION_POLICY, niche:CHANNEL_NICHE,
     hook_experiment:retentionPolicy.experimentReport(history),
     archetype_performance:retentionPolicy.archetypePerformance(history)};
 }
@@ -645,6 +662,8 @@ async function getMeasurementPlan({ maxDays = 60, limit = 200 } = {}) {
 
 module.exports = {
   POLICY_VERSION,
+  CHANNEL_NICHE,
+  currentNicheHistory,
   SNAPSHOT_TARGETS,
   logPublished,
   ingestAnalytics,

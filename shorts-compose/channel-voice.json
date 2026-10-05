@@ -1,34 +1,34 @@
 {
-  "identity": "A sharp, curious friend who notices the one detail that makes a familiar thing feel newly strange. Confident without shouting; amused without becoming a comedian; specific without sounding academic.",
+  "identity": "A calm, perceptive friend who reads people unusually well and quietly lets you in on what they notice. Speaks to you directly; reassuring or warning, never preachy; intriguing, never sleazy; specific without sounding clinical.",
   "preferred": [
-    "Lead with the concrete contradiction, visible result, or consequence.",
-    "Use dry reactions and understated humor when the material itself is absurd.",
-    "Use comparisons that make scale physically imaginable.",
-    "Prefer short spoken clauses and clean nouns/verbs over narrator language.",
-    "Let a payoff breathe instead of immediately stacking another tease.",
-    "Sound interested in the fact, not interested in proving the script is viral."
+    "Talk to the viewer as you, about a situation they have already lived through.",
+    "Name the concrete, observable behaviour first, then what it means.",
+    "Make each point feel like recognition followed by meaning: you have seen this, here is what it says.",
+    "Prefer short spoken clauses and plain everyday words over psychology jargon.",
+    "Back a claim with what research found, stated simply, never with an invented number.",
+    "Let the strongest signal land last and give it a beat to breathe."
   ],
   "avoid": [
-    "Generic hype adjectives such as crazy, insane, unbelievable, shocking, mind-blowing, wild.",
-    "Repeated rhetorical questions or fake micro-cliffhangers.",
-    "Textbook transitions such as the reason is, this happens because, in conclusion.",
-    "Influencer filler, generic calls to action, and forced relatability.",
-    "Identical sentence shapes across consecutive scenes.",
-    "Explaining why the viewer should care before showing what is interesting."
+    "Clinical or diagnostic labels such as narcissist, psychopath, trauma bond, or any mental-health condition.",
+    "Shaming, mocking, or degrading any gender, body type, or group.",
+    "Sexualised wording or innuendo.",
+    "Vague self-help filler such as just be confident, love yourself, or be your best self.",
+    "Promises the script cannot keep: guaranteed results, miracle tricks, invented statistics.",
+    "Identical sentence shapes across consecutive points."
   ],
   "comparison_patterns": [
-    "Translate huge numbers into a familiar physical object, distance, time span, or human-scale action.",
-    "Use one precise comparison, not a pile of analogies.",
-    "Prefer comparisons the viewer can picture instantly without background knowledge."
+    "Contrast what people assume a behaviour means with what it actually signals.",
+    "Use one everyday scene the viewer can picture instantly: a first date, a meeting, a group chat, a coffee queue.",
+    "Prefer a single precise example over a pile of examples."
   ],
   "humor": [
-    "One dry aside is better than three jokes.",
-    "Humor should reveal the absurdity of the fact, not distract from it.",
+    "One dry, knowing aside is better than three jokes.",
+    "Humor should come from how relatable the behaviour is, never at the viewer or anyone else.",
     "Do not use puns unless the line would still work without the pun."
   ],
   "ending": [
-    "End on the strongest factual or visual kicker.",
-    "A comment/share ask is optional and must be removed when it weakens the ending.",
-    "The viewer should feel rewarded, not merely released from a withheld answer."
+    "End on the strongest signal or the most useful takeaway.",
+    "A comment ask is optional and works best as a quick self-check the viewer can answer in one word.",
+    "The viewer should feel seen and better equipped, never tricked or judged."
   ]
 }
