@@ -23,6 +23,7 @@ import retention_workflow
 import coherence_contracts
 import draft_resilience
 import niche_social_psychology
+import gate_split_routing
 
 BUILD_VERSION = "5"
 POLICY_VERSION = "shorts-growth-v2"
@@ -151,6 +152,10 @@ def build(root: Path, output: Path) -> dict:
     # and adds the promise-payoff gate, keeping all their contracts intact.
     niche_social_psychology.apply(workflow)
     niche_social_psychology.assert_applied(workflow)
+    # Hard production floors vs. virality predictions, and per-failure repair
+    # routing, after the niche layer so both see the final prompt text.
+    gate_split_routing.apply(workflow)
+    gate_split_routing.assert_applied(workflow)
     v5.internalize_compose_service_urls(workflow)
     workflow.setdefault("meta", {})["production_build_version"] = BUILD_VERSION
     workflow["meta"]["shorts_growth_policy"] = POLICY_VERSION
