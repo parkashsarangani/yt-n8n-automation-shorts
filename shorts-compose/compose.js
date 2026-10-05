@@ -625,7 +625,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
   // frame - brand recognition without delaying the hook. Spans the whole video.
   const wm = String(CHANNEL_WORDMARK).replace(/[{}]/g, "");
   const handle = String(CHANNEL_HANDLE).replace(/[{}]/g, "");
-  let events = `Dialogue: 0,${toAssTime(0)},${toAssTime(totalDuration)},Wordmark,,0,0,0,,${wm}\n`;
+  // The top-right logo + handle brand every frame; the top-centre channel name
+  // is off by default to keep the first frame clean (SHOW_WORDMARK=true restores it).
+  let events = String(process.env.SHOW_WORDMARK || "false").toLowerCase() === "true"
+    ? `Dialogue: 0,${toAssTime(0)},${toAssTime(totalDuration)},Wordmark,,0,0,0,,${wm}\n`
+    : "";
   events += `Dialogue: 0,${toAssTime(0)},${toAssTime(totalDuration)},WordmarkHandle,,0,0,0,,${handle}\n`;
   const WORDS_PER_CHUNK = 2;
 
