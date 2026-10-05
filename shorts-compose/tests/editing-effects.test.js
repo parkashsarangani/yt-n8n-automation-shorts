@@ -104,7 +104,9 @@ test("technical QA parser and verdicts", () => {
 });
 
 // Real renders through the bundled ffmpeg.
-test("renders with ffmpeg: role motion applies, technical QA passes good and rejects broken renders", async () => {
+const { ffmpegBinarySkipReason } = require("./helpers/environment");
+
+test("renders with ffmpeg: role motion applies, technical QA passes good and rejects broken renders", { skip: ffmpegBinarySkipReason() }, async () => {
   const ff = require("ffmpeg-static");
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "editing-fx-"));
   try {

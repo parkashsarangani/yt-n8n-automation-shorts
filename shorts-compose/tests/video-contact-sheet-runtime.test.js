@@ -16,7 +16,8 @@ const resolverPath = path.join(__dirname, "..", "brollResolver.js");
 const transformed = fs.readFileSync(resolverPath, "utf8").includes("V4_VIDEO_SAMPLE_STAGING");
 const { sampleVideoContactSheet, materializeVerifiedClip } = require("../brollResolver");
 
-const maybeDescribe = transformed ? describe : describe.skip;
+const { ffmpegBinarySkipReason } = require("./helpers/environment");
+const maybeDescribe = transformed && !ffmpegBinarySkipReason() ? describe : describe.skip;
 
 maybeDescribe("production V4 video contact-sheet runtime", () => {
   let dir;

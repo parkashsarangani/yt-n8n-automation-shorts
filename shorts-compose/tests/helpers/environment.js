@@ -49,6 +49,20 @@ function renderToolchainSkipReason() {
 }
 
 /**
+ * Tests that execute the bundled ffmpeg binary. CI installs dependencies with
+ * --ignore-scripts (no rendering, no binary downloads), so the binary is absent
+ * there and these tests skip; locally they run against ffmpeg-static.
+ * @returns {string|false}
+ */
+function ffmpegBinarySkipReason() {
+  try {
+    const bin = require("ffmpeg-static");
+    if (bin && fs.existsSync(bin)) return false;
+  } catch {}
+  return "requires the ffmpeg-static binary (not installed on CI, which does no rendering)";
+}
+
+/**
  * Production invariants are only present in built artifacts. Returns a skip
  * reason when handed un-transformed source.
  * @returns {string|false}
@@ -76,6 +90,7 @@ module.exports = {
   hasSystemFfmpeg,
   hasRemotionBinding,
   renderToolchainSkipReason,
+  ffmpegBinarySkipReason,
   builtArtifactSkipReason,
   readArtifact,
 };

@@ -195,11 +195,8 @@ shorts-compose/
     tests/
 
 .github/workflows/
-    quality-check.yml
+    ci.yml        # one PR job: build twice, contract checks, tests, audit (no rendering)
     deploy.yml
-    retrieval-recall-check.yml
-    retrieval-telemetry-check.yml
-    multiframe-phase3-check.yml
 ```
 
 ## Persistence

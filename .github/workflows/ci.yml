@@ -1,16 +1,53 @@
 name: CI
 
+# One job, no rendering: build the exact production artifacts, check their
+# contracts, run the unit/contract test suite against them, run the
+# pre-production audit. Rendering, the Remotion toolchain, ML runtimes and
+# container smoke tests are deliberately left out - the deploy itself builds
+# and health-checks the real containers.
 on:
   pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 jobs:
-  docker-build:
-    name: Docker Build (validate)
-    runs-on: self-hosted
+  checks:
+    name: Build, contracts and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build shorts-compose image (no push)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build production artifacts (twice, must be identical)
         run: |
-          docker build -t shorts-compose:pr-${{ github.event.pull_request.number }} ./shorts-compose
+          set -euo pipefail
+          python3 -m py_compile scripts/*.py
+          python3 scripts/build_production_artifacts.py --output-dir /tmp/production-a
+          python3 scripts/build_production_artifacts.py --output-dir /tmp/production-b
+          cmp /tmp/production-a/manifest.json /tmp/production-b/manifest.json
+          docker compose config >/dev/null
+
+      - name: Contract checks
+        run: python3 scripts/ci_checks.py /tmp/production-a
+
+      - name: Install Node dependencies (no binary downloads)
+        run: |
+          set -euo pipefail
+          cd shorts-compose
+          npm install --ignore-scripts --no-package-lock --no-audit --no-fund
+
+      - name: Tests on the exact deploy artifacts
+        env:
+          CREATIVE_SYSTEM_EXPECT_PREFLIGHT: 'true'
+        run: |
+          set -euo pipefail
+          cp /tmp/production-a/compose.js shorts-compose/compose.js
+          cp /tmp/production-a/brollResolver.js shorts-compose/brollResolver.js
+          cd shorts-compose
+          npm test
+
+      - name: Pre-production audit
+        run: python3 scripts/preprod-audit.py

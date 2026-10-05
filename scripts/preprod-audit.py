@@ -257,17 +257,22 @@ def audit_static_runtime() -> None:
 
 
 def audit_build_wiring() -> None:
-    quality = (ROOT / ".github/workflows/quality-check.yml").read_text(encoding="utf-8")
+    quality = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
     deploy = (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
-    for text, label in [(quality, "quality CI"), (deploy, "deploy")]:
+    for text, label in [(quality, "CI"), (deploy, "deploy")]:
         require(text, ["scripts/build_production_artifacts.py"], label)
     if "upgrade-compose-runtime-hardening.py" in quality or "upgrade-compose-runtime-hardening.py" in deploy:
         die("CI/deploy reintroduced an independent legacy runtime transform chain")
+    # CI does no rendering or container pulls; it proves the build is
+    # deterministic and runs the consolidated contract checks (which include
+    # the LLM-routing settings in docker-compose.yml).
     require(quality, [
         "cmp /tmp/production-a/manifest.json /tmp/production-b/manifest.json",
-        "docker manifest inspect ghcr.io/tashfeenahmed/freellmapi:v0.9.5",
-        "LLM_ROUTER_FAIL_OPEN_TO_DIRECT",
-    ], "quality deterministic-build/LLM routing check")
+        "scripts/ci_checks.py /tmp/production-a",
+    ], "CI deterministic-build/contract check")
+    require((ROOT / "scripts/ci_checks.py").read_text(encoding="utf-8"), [
+        "LLM_ROUTER_FAIL_OPEN_TO_DIRECT", "ghcr.io/tashfeenahmed/freellmapi:v0.9.5",
+    ], "CI contract checks LLM routing")
     require(deploy, [
         "/tmp/yt-shorts-production/workflow.json", "/tmp/yt-shorts-production/compose.js",
         "/tmp/yt-shorts-production/brollResolver.js", "FREELLMAPI_ENCRYPTION_KEY",
