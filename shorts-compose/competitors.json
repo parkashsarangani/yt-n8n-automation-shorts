@@ -1,9 +1,25 @@
 {
-  "_comment": "Watchlist for competitor outlier mining (/competitors/mine). Each week the miner pulls each channel's recent SHORTS, finds the ones that beat that channel's OWN median views (an outlier - a breakout, normalized per channel so a small channel is judged fairly against a giant one), and distills the transferable topic/angle patterns into competitor_signals.json, which the topic generator reads as inspiration. It NEVER copies titles. Edit this list freely: add a channel with either a channel_id (UC...) or a handle (@name) - at least one is required; the miner resolves and validates each at runtime and reports any it could not resolve. You can also override this whole list without a code edit via the COMPETITOR_CHANNELS env var (a comma-separated list of @handles/UC ids, set as a GitHub secret; applies on the next deploy). IMPORTANT LESSON LEARNED: a channel having a big subscriber count or a matching description does NOT mean it is currently active - several previously-listed channels (large subs, right format) turned out to have gone dormant 1-3+ years ago and always scanned at 0 recent_shorts. Every channel below was verified by opening its actual Shorts tab on YouTube and checking the most recent upload date at the time of writing (2026-08-16) - each had posted within the last few days. If a channel here goes quiet, drop it and re-verify a replacement the same way (check upload recency, not just subs/description) rather than trusting a listicle or stats site.",
+  "_comment": "Watchlist for competitor outlier mining (/competitors/mine). Each week the miner pulls each channel's recent SHORTS, finds the ones that beat that channel's OWN median views (an outlier - a breakout, normalized per channel so a small channel is judged fairly against a giant one), and distills the transferable topic/angle patterns into competitor_signals.json, which the topic generator reads as inspiration. It NEVER copies titles. Edit this list freely: add a channel with either a channel_id (UC...) or a handle (@name) - at least one is required; the miner resolves and validates each at runtime and reports any it could not resolve. You can also override this whole list without a code edit via the COMPETITOR_CHANNELS env var (a comma-separated list of @handles/UC ids, set as a GitHub secret; applies on the next deploy). IMPORTANT LESSON LEARNED: a channel having a big subscriber count or a matching description does NOT mean it is currently active - several previously-listed channels (large subs, right format) turned out to have gone dormant 1-3+ years ago and always scanned at 0 recent_shorts. Every channel below was verified by opening its actual Shorts tab on YouTube and checking the most recent upload date at the time of writing (2026-10-05, after the switch to the social-psychology niche) - each had posted within the last few days. If a channel here goes quiet, drop it and re-verify a replacement the same way (check upload recency, not just subs/description) rather than trusting a listicle or stats site.",
   "channels": [
-    { "name": "Zack D. Films", "channel_id": "UCvz84_Q0BbvZThy75mbd-Dg", "handle": "@zackdfilms", "note": "The format benchmark: one animated single fact per Short (body/space/how-things-work), ~28M subs. Verified active." },
-    { "name": "Matthew Santoro", "channel_id": "UCXhSCMRRPyxSoyLSPFxK7VA", "handle": "@MatthewSantoro", "note": "Amazing/curiosity facts, shorts-native, ~5.9M subs. Verified active." },
-    { "name": "Facts' Mine", "channel_id": "UCC6gbNO098rkQKCU0ZaLITQ", "handle": "@FactsMine", "note": "Single-fact Shorts, ~18.9M subs. Verified active - most recent Short 2 days old at time of writing." },
-    { "name": "Sean Andrew", "channel_id": "UCaPu3LJBU5w_ghFUMeko-nA", "handle": "@SeanAndreww", "note": "Single curiosity-fact Shorts, ~7.4M subs. Verified active - most recent Short 1 day old at time of writing." }
+    {
+      "name": "The Real Facts",
+      "handle": "@Therealfacts-MD",
+      "note": "Faceless psychology/self-improvement Shorts, ~84.5K subs, consistently 11K-70K views per Short. Verified active - latest Short 2026-10-04."
+    },
+    {
+      "name": "Stoic Legend",
+      "handle": "@StoicLegend-MR",
+      "note": "Faceless 'signs someone secretly...' and dating-psychology Shorts, ~142K subs. Verified active - latest Short 2026-10-05."
+    },
+    {
+      "name": "Crush Psychology",
+      "handle": "@CrushPsychologyOfficial",
+      "note": "Faceless attraction/crush-psychology Shorts, ~91K subs, outliers up to ~683K. Verified active - latest Short 2026-10-05."
+    },
+    {
+      "name": "Francesca Psychology",
+      "handle": "@francescapsychology",
+      "note": "Social-skills and body-language Shorts, ~507K subs (1.3M-view 'signs someone does not like you'). Verified active - latest Short 2026-09-29."
+    }
   ]
 }

@@ -260,7 +260,7 @@ async function analyzeExecution(outlier) {
     `Analyze PUBLIC PACKAGING SIGNALS for this breakout YouTube Short. You have only the cover/thumbnail image plus title and duration; ` +
     `do NOT claim to know the actual first frame, spoken hook, edit cadence, or payoff timing. ` +
     `Title: "${outlier.title}". Duration: ${outlier.duration_sec}s. ` +
-    `Extract transferable creative choices for a faceless single-fact Shorts channel. ` +
+    `Extract transferable creative choices for a faceless Shorts channel about the psychology of attraction, respect and hidden social signals. ` +
     `Return ONLY JSON with: visual_hook_proxy (brief), dominant_subject, composition_type, visual_contrast, apparent_emotion, ` +
     `title_hook_shape, likely_concept_archetype, reproducible (boolean), caveat (must mention this is a thumbnail/cover proxy).`;
 
@@ -317,7 +317,7 @@ async function buildExecutionProfiles(outliers) {
 const DISTILL_PROMPT = (outliersJson, executionJson) =>
 `You are mining breakout Shorts for TRANSFERABLE SIGNALS, not copying videos.
 
-Our format: faceless, one surprising mass-appeal fact per Short; no medical topics, no biographies, no obscure subjects.
+Our format: faceless Shorts on the psychology of attraction, respect and hidden social signals - an insecurity-driven hook with a specific promise (often 3-5 signs or habits) that the script fully delivers; no medical topics or clinical labels, no sexualised angles, no shaming of any group.
 
 BREAKOUT OUTLIERS (normalized within each channel):
 ${outliersJson}
@@ -328,12 +328,12 @@ ${executionJson}
 Important: execution profiles are based only on public thumbnail/cover imagery + title + duration. They are a packaging/first-frame PROXY, not direct observation of the actual opening frame, narration, editing, or payoff. Never overstate what they prove.
 
 Extract two kinds of signal:
-1. TOPIC/ANGLE: recurring subject/angle patterns that transfer to our single-fact format.
+1. TOPIC/ANGLE: recurring subject/angle patterns that transfer to our format.
 2. EXECUTION: recurring visual packaging/composition/hook-shape patterns that we can deliberately test in our own first frame and visual grammar.
 
 RULES:
 - Never reproduce a competitor title.
-- Drop listicles, medical/health, compilations, creator-personality-dependent formats, or niche fandom deep-cuts.
+- Drop medical/health or diagnostic-label angles, sexualised angles, compilations, and creator-personality-dependent formats. Short numbered lists ('3 signs...') are our format and are fine.
 - Prefer patterns supported by multiple outliers/channels.
 - Distinguish a repeated pattern from a one-off hypothesis.
 - No claims about competitor retention or exact editing unless those data are actually provided (they are not).
