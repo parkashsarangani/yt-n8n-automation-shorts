@@ -9,7 +9,7 @@
 ## Decisions (made 2026-10-05)
 1. **Channel:** keep the existing channel. Analytics only learn from videos tagged with the new niche (`CHANNEL_NICHE=social_psychology_v1`).
 2. **Voice:** ElevenLabs premade "Brian" (`nPczCjzI2devNBz1zQrb`), a deep, calm voice. Listen to a sample before going live; it is one constant (`VOICE_ID` in `scripts/niche_social_psychology.py`).
-3. **Cadence:** 1 Short a day at 16:00 Europe/Berlin.
+3. **Cadence:** 1 Short a day at 12:00 Europe/Berlin (moved from 16:00 on 2026-10-05).
 
 ## Prerequisite
 The HP server is unreachable (Cloudflare 530, both runners offline since around 2026-10-01). Nothing can be deployed or measured until it's back.
