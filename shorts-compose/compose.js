@@ -61,8 +61,8 @@ const DEFAULT_OUTRO_LINE = "Comment, like, share, and follow";
 // brand) burned on every frame, an optional corner logo watermark, and a
 // consistent signature music bed. All build recognition / a returning
 // audience without delaying the hook.
-const CHANNEL_WORDMARK = process.env.CHANNEL_WORDMARK || "Favourite Facts";
-const CHANNEL_HANDLE = process.env.CHANNEL_HANDLE || "@YourFavouriteDailyFacts";
+const CHANNEL_WORDMARK = process.env.CHANNEL_WORDMARK || "Behind the Glance";
+const CHANNEL_HANDLE = process.env.CHANNEL_HANDLE || "@behindtheglance";
 // Optional corner logo (gold lightbulb): drop a transparent PNG at
 // shorts-compose/assets/logo.png to activate - see assets/README.md. Without
 // it, this is a clean no-op, same pattern as music/signature.mp3.

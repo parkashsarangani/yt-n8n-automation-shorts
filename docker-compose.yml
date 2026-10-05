@@ -179,8 +179,8 @@ services:
       - COMPETITOR_CHANNELS=${COMPETITOR_CHANNELS:-}
 
       # Channel identity.
-      - CHANNEL_WORDMARK=${CHANNEL_WORDMARK:-Favourite Facts}
-      - CHANNEL_HANDLE=${CHANNEL_HANDLE:-@YourFavouriteDailyFacts}
+      - CHANNEL_WORDMARK=${CHANNEL_WORDMARK:-Behind the Glance}
+      - CHANNEL_HANDLE=${CHANNEL_HANDLE:-@behindtheglance}
     volumes:
       - shorts_outputs:/app/outputs
       - shorts_data:/app/data
