@@ -68,12 +68,32 @@ QUALITY_GATE_JS = (
     "}\n\n"
 )
 
+# Pacing and claim calibration, inserted before the medical backstop (errors and
+# parsed are in scope there). A scene is one picture, so a long scene is a still
+# held too long; absolutes overclaim what social-psychology research supports.
+MAX_SCENE_WORDS = 26
+PACING_CLAIMS_JS = r"""// SCENE_PACING_V1: one scene = one picture, so cap spoken words per scene.
+if (Array.isArray(parsed.scenes)) {
+  parsed.scenes.filter((s) => s && !(s.template_data && s.template_data.is_outro)).forEach((s) => {
+    const n = String(s.narration || '').trim().split(/\s+/).filter(Boolean).length;
+    if (n > __MAX__) errors.push(`scene ${s.scene_index} narration has ${n} words (max __MAX__) - split it into separate scenes, each with its own footage`);
+  });
+}
+// CLAIM_CALIBRATION_V1: one behaviour is a clue, not proof.
+const _ccText = [parsed.title, ...(Array.isArray(parsed.scenes) ? parsed.scenes.map((s) => s && s.narration) : [])].filter(Boolean).join(' ');
+const _ccHit = _ccText.match(/\b(?:the most reliable|always means|never lies|guaranteed|regardless of what (?:they|he|she|people) says?|without exception|scientifically proven|proves that)\b|\b100 ?%/i);
+if (_ccHit) errors.push(`absolute claim "${_ccHit[0]}" - restate it as a tendency the research supports (often / a sign that)`);
+
+""".replace("__MAX__", str(MAX_SCENE_WORDS))
+
 # Order matters: the first matching rule wins.
 ROUTING_JS = r"""// GATE_ROUTING_V1: tag every failure with the response it needs, so the
 // repair pass regenerates creative work instead of polishing a weak hook.
 const _routeFor = (e) => {
   if (/medical\/health content/.test(e)) return 'NEW_TOPIC';
   if (/different topic than the one selected/.test(e)) return 'REWRITE_ON_TOPIC';
+  if (/^scene \d+ narration has \d+ words/.test(e)) return 'SPLIT_LONG_SCENE';
+  if (/^absolute claim /.test(e)) return 'REWRITE_CLAIMS';
   if (/^hook (opens with a generic phrase|missing)/.test(e)) return 'NEW_HOOK_BRANCH';
   if (/^quality\.evidence_strength/.test(e)) return 'REWRITE_CLAIMS';
   if (/^quality\.payoff_strength|^payoff\.|promise/.test(e)) return 'FIX_PROMISE_PAYOFF';
@@ -82,7 +102,7 @@ const _routeFor = (e) => {
 };
 return { json: { _scriptValid: false, _validationErrors: errors.map((e) => `[${_routeFor(e)}] ${e}`), _failedScript: parsed } };"""
 
-ROUTING_PROMPT = r"""\n\nGATE_ROUTING_V1 - every failed check below starts with an action tag. Follow it; where it conflicts with the preserve-everything instructions above, the tag wins for the parts it names:\n- [REPAIR_FIELDS]: fix exactly the named field(s) and preserve everything else.\n- [NEW_HOOK_BRANCH]: do not polish the failed hook. Discard it and its hook_candidates, write 5 NEW candidates in shapes the failed hook did not use, set hook to the strongest, and align the title and scene 0 narration with it. Keep the promise the rest of the script delivers.\n- [FIX_PROMISE_PAYOFF]: make the hook, title, promised_points and payoff agree, and make every promised item specific and fully delivered - rewrite weak items rather than renumbering around them.\n- [REWRITE_CLAIMS]: narrow every claim to what the supplied evidence supports and reframe the hook if it overclaims. Never invent evidence.\n- [NEW_VISUAL_TREATMENT]: replan the visuals of the named scenes from scratch (new visual_claim, proof mode and search queries) instead of tweaking the failed plan.\n- [REWRITE_ON_TOPIC]: rewrite the script from scratch on the selected topic above, keeping none of the off-topic wording.\n- [NEW_TOPIC]: apply the CATEGORICAL TOPIC REJECTION exception above.\n\nFAILED CHECKS: """
+ROUTING_PROMPT = r"""\n\nGATE_ROUTING_V1 - every failed check below starts with an action tag. Follow it; where it conflicts with the preserve-everything instructions above, the tag wins for the parts it names:\n- [REPAIR_FIELDS]: fix exactly the named field(s) and preserve everything else.\n- [NEW_HOOK_BRANCH]: do not polish the failed hook. Discard it and its hook_candidates, write 5 NEW candidates in shapes the failed hook did not use, set hook to the strongest, and align the title and scene 0 narration with it. Keep the promise the rest of the script delivers.\n- [FIX_PROMISE_PAYOFF]: make the hook, title, promised_points and payoff agree, and make every promised item specific and fully delivered - rewrite weak items rather than renumbering around them.\n- [REWRITE_CLAIMS]: narrow every claim to what the supplied evidence supports and reframe the hook if it overclaims. State findings as tendencies (often, tends to, a sign that), never absolutes. Never invent evidence.\n- [SPLIT_LONG_SCENE]: split the named scene into two or more scenes of at most 22 words each, each with its own visual_claim, proof mode and search queries (a new picture per scene). Renumber scene_index sequentially from 0 and update payoff.resolved_in_scene and promised_points to match; this overrides the instruction to keep scene numbering unchanged.\n- [NEW_VISUAL_TREATMENT]: replan the visuals of the named scenes from scratch (new visual_claim, proof mode and search queries) instead of tweaking the failed plan.\n- [REWRITE_ON_TOPIC]: rewrite the script from scratch on the selected topic above, keeping none of the off-topic wording.\n- [NEW_TOPIC]: apply the CATEGORICAL TOPIC REJECTION exception above.\n\nFAILED CHECKS: """
 
 FLOORS_PROMPT = (
     "GATE_SPLIT_V1 - you produce two kinds of score. HARD PRODUCTION FLOORS (below these the script is broken and must be fixed): "
@@ -128,6 +148,8 @@ def apply(workflow: dict) -> None:
     code = _between(code, "const q = parsed.quality;", "if (!parsed.hook || parsed.hook.length < 5", QUALITY_GATE_JS, "quality floors")
     code = _sub(code, "return { json: { _scriptValid: false, _validationErrors: errors, _failedScript: parsed } };", ROUTING_JS, "failure routing")
     code = _sub(code, "const seedTopicItem = (($('Extract Generated Topic').item||{}).json||{});", TOPIC_SEED_JS, "resolved topic seed")
+    medical = "// Medical/health exclusion backstop - a best-effort keyword scan, not"
+    code = _sub(code, medical, PACING_CLAIMS_JS + medical, "pacing and claim checks")
     p["jsCode"] = code
 
     for name in (VISUAL, REPAIR):
@@ -147,7 +169,7 @@ def apply(workflow: dict) -> None:
 def assert_applied(workflow: dict) -> None:
     nodes = _nodes(workflow)
     code = nodes[VALIDATE]["parameters"]["jsCode"]
-    for m in (MARKER, ROUTING_MARKER, "predicted_virality", "_resolvedItem"):
+    for m in (MARKER, ROUTING_MARKER, "predicted_virality", "_resolvedItem", "SCENE_PACING_V1", "CLAIM_CALIBRATION_V1"):
         if m not in code:
             raise RuntimeError(f"{MARKER}: validator lost invariant: {m}")
     for k in ("shareability: 76", "hook_strength: 78", "concept_strength: 76"):
