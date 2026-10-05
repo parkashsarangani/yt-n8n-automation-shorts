@@ -502,7 +502,10 @@ async function resolveBroll(input = {}) {
   };
   const recent = await library.recentUrls();
   const reusable = await library.findReusable(contract, recent);
-  let candidates = reusable.map((r) => ({ ...r, source: `library:${r.source || "proven"}`, alt: r.contract_text, query: queryList[0], library_hit: true }));
+  // A re-pick after final QA passes the footage it rejected; never offer it again.
+  const excluded = new Set((Array.isArray(input.exclude_urls) ? input.exclude_urls : []).filter(Boolean));
+  const allowed = (c) => !excluded.has(c.url) && !excluded.has(c.original_url);
+  let candidates = reusable.map((r) => ({ ...r, source: `library:${r.source || "proven"}`, alt: r.contract_text, query: queryList[0], library_hit: true })).filter(allowed);
 
   let searchRounds = 0, queriesTried = [];
   let queryCursor = 0;
@@ -514,7 +517,7 @@ async function resolveBroll(input = {}) {
       const batch = queryList.slice(queryCursor, queryCursor + INITIAL_SEARCH_QUERIES); if (!batch.length) break;
       searchRounds++; queriesTried.push(...batch);
       const external = await collectCandidates(batch, subj, input.source_priority || []);
-      candidates = dedupeCandidates([...candidates, ...external]).filter((c) => !recent.has(c.url) || c.library_hit).slice(0, CANDIDATE_POOL_MAX);
+      candidates = dedupeCandidates([...candidates, ...external]).filter((c) => (!recent.has(c.url) || c.library_hit) && allowed(c)).slice(0, CANDIDATE_POOL_MAX);
       if (candidates.length >= VISION_TOP_N * 2) break;
       if (remainingDeadlineMs(state) < 5000) { state.budget_exhausted = "resolver_deadline_exhausted"; break; }
     }

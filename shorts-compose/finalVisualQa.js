@@ -23,6 +23,8 @@ const HARD_READABILITY = Math.max(0, Math.min(100, Number(process.env.BROLL_FINA
 const SOFT_READABILITY = Math.max(HARD_READABILITY, Math.min(100, Number(process.env.BROLL_FINAL_QA_SOFT_READABILITY || 70)));
 const HARD_LAYOUT = Math.max(0, Math.min(100, Number(process.env.BROLL_FINAL_QA_HARD_LAYOUT || 55)));
 const SOFT_LAYOUT = Math.max(HARD_LAYOUT, Math.min(100, Number(process.env.BROLL_FINAL_QA_SOFT_LAYOUT || 70)));
+// Below this semantic match, footage is treated as contradicting the narration.
+const CRITICAL_SEMANTIC = Math.max(0, Math.min(HARD_SCORE, Number(process.env.BROLL_FINAL_QA_CRITICAL_SEMANTIC || 50)));
 
 function run(args) {
   return new Promise((resolve, reject) => {
@@ -157,7 +159,16 @@ function classifyRenderedIssue(sceneIndex, normalized, contract) {
 
   if (normalized.debug_artifact) hard.push(issue(sceneIndex, "hard", "visible debug/diagnostic overlay leaked into final video", normalized));
   if (normalized.critical_content_clipped) hard.push(issue(sceneIndex, "hard", "critical visual evidence or text is clipped/hidden", normalized));
-  if (!hardSemanticOk || effectiveScore < HARD_SCORE) hard.push(issue(sceneIndex, "hard", normalized.problem || "rendered visual materially fails the scene contract", normalized));
+  if (!hardSemanticOk || effectiveScore < HARD_SCORE) {
+    const contractFailure = issue(sceneIndex, "hard", normalized.problem || "rendered visual materially fails the scene contract", normalized);
+    // FINAL_QA_REPICK_V1: critical means worth one automatic footage re-pick.
+    // The first frame always qualifies (it decides the scroll); later scenes
+    // only when the footage clearly contradicts the narration. Designed
+    // templates are deterministic, so a re-pick cannot improve them.
+    contractFailure.critical = !contract.is_deterministic_template
+      && (Number(sceneIndex) === 0 || Number(normalized.semantic_match) < CRITICAL_SEMANTIC);
+    hard.push(contractFailure);
+  }
   if (normalized.readability < HARD_READABILITY) hard.push(issue(sceneIndex, "hard", "final frame readability is too low", normalized));
   if (normalized.safe_area < HARD_LAYOUT) hard.push(issue(sceneIndex, "hard", "important content violates the mobile safe area", normalized));
   if (normalized.caption_integrity < HARD_LAYOUT) hard.push(issue(sceneIndex, "hard", "captions are clipped, colliding or materially obscuring the subject", normalized));
