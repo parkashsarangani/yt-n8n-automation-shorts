@@ -52,8 +52,32 @@ test('each failure is tagged with the response it needs', ()=>{
     'script appears to be about a different topic than the one selected ("x")':'REWRITE_ON_TOPIC',
     'scene 2 narration too short/missing':'REPAIR_FIELDS',
     'title missing or out of bounds (5-60 chars)':'REPAIR_FIELDS',
+    'scene 2 narration has 41 words (max 26) - split it into separate scenes, each with its own footage':'SPLIT_LONG_SCENE',
+    'absolute claim "the most reliable" - restate it as a tendency the research supports (often / a sign that)':'REWRITE_CLAIMS',
   };
   for(const [error,expected] of Object.entries(cases)) assert.equal(route(error),expected,error);
+});
+
+// Run the built pacing + claim checks in isolation.
+function pacingClaims(parsed){
+  const errors=[];
+  new Function('parsed','errors',slice('// SCENE_PACING_V1','// Medical/health exclusion backstop'))(parsed,errors);
+  return errors;
+}
+const words=(n)=>Array.from({length:n},()=>'word').join(' ');
+
+test('a scene over 26 spoken words must be split; the outro is exempt', ()=>{
+  assert.deepEqual(pacingClaims({title:'t',scenes:[{scene_index:0,narration:words(22)},{scene_index:1,narration:words(26)}]}),[]);
+  const errors=pacingClaims({title:'t',scenes:[{scene_index:0,narration:words(10)},{scene_index:2,narration:words(41)},{scene_index:3,narration:words(40),template_data:{is_outro:true}}]});
+  assert.deepEqual(errors,['scene 2 narration has 41 words (max 26) - split it into separate scenes, each with its own footage']);
+});
+
+test('absolute claims are rejected, calibrated ones pass', ()=>{
+  // The real failure from execution 1086.
+  const bad=pacingClaims({title:'Your Feet Betray You',scenes:[{scene_index:2,narration:"It's the most reliable signal of interest. The conversation is over, regardless of what they say."}]});
+  assert.match(bad.join(' '),/absolute claim "the most reliable"/);
+  assert.match(pacingClaims({title:'This Works 100% of the Time',scenes:[]}).join(' '),/absolute claim "100%"/);
+  assert.deepEqual(pacingClaims({title:'Your Feet Can Give You Away',scenes:[{scene_index:1,narration:'Feet pointing away is often a sign that someone wants to leave.'}]}),[]);
 });
 
 test('a candidate-pool topic switch is judged against the new topic', ()=>{
