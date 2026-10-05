@@ -77,7 +77,9 @@ test("only a failed first frame or clearly contradicting footage is critical", (
 function repickBlock() {
   const source = fs.readFileSync(path.join(__dirname, "..", "compose.js"), "utf8");
   const start = source.indexOf("    // FINAL_QA_REPICK_V1:");
-  const end = source.indexOf("    await fsp.copyFile(finalPath, outputFullPath);", start);
+  // The block ends where the technical QA (or, without it, the final copy) begins.
+  const tqa = source.indexOf("    // TECHNICAL_QA_V1:", start);
+  const end = tqa >= 0 ? tqa : source.indexOf("    await fsp.copyFile(finalPath, outputFullPath);", start);
   assert.ok(start >= 0 && end > start, "re-pick block sits before the final copy");
   return new Function("finalVisualQa", "reqBody", "scenes", "resolveBroll", "runComposeJob", "newTmpDir", "jobId",
     "return (async () => {" + source.slice(start, end) + "\nreturn null; })();");

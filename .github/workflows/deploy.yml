@@ -88,6 +88,7 @@ jobs:
           node --check shorts-compose/clipLibrary.js
           node --check shorts-compose/finalVisualQa.js
           node --check shorts-compose/editingEffects.js
+          node --check shorts-compose/technicalQa.js
           node --check shorts-compose/llmRouting.js
           node --check shorts-compose/llmGateway.js
 
