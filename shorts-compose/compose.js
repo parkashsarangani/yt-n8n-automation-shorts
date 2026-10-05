@@ -61,8 +61,8 @@ const DEFAULT_OUTRO_LINE = "Comment, like, share, and follow";
 // brand) burned on every frame, an optional corner logo watermark, and a
 // consistent signature music bed. All build recognition / a returning
 // audience without delaying the hook.
-const CHANNEL_WORDMARK = process.env.CHANNEL_WORDMARK || "Favourite Facts";
-const CHANNEL_HANDLE = process.env.CHANNEL_HANDLE || "@YourFavouriteDailyFacts";
+const CHANNEL_WORDMARK = process.env.CHANNEL_WORDMARK || "Behind the Glance";
+const CHANNEL_HANDLE = process.env.CHANNEL_HANDLE || "@behindtheglance";
 // Optional corner logo (gold lightbulb): drop a transparent PNG at
 // shorts-compose/assets/logo.png to activate - see assets/README.md. Without
 // it, this is a clean no-op, same pattern as music/signature.mp3.
@@ -615,7 +615,7 @@ Style: CaptionHL,Inter Bold,68,&H0096E0FF,&H000000FF,&H40000000,&H80000000,0,0,0
 Style: CaptionKey,Inter Bold,68,&H0080FF60,&H000000FF,&H40000000,&H80000000,0,0,0,0,105,105,0,0,1,3,4,2,60,60,420,1
 Style: CommentHook,Inter Bold,54,&H00FFFFFF,&H000000FF,&H40202020,&HC0000000,0,0,0,0,100,100,0,0,3,0,4,2,80,80,680,1
 Style: Wordmark,Inter Bold,36,&H6046BEFF,&H000000FF,&HB0000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,40,40,55,1
-Style: WordmarkHandle,Inter Bold,24,&H8046BEFF,&H000000FF,&HB0000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,8,40,40,100,1
+Style: WordmarkHandle,Inter Bold,28,&H3046BEFF,&H000000FF,&HB0000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,9,40,40,178,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
