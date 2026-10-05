@@ -65,3 +65,52 @@ test("final visual QA can never block an otherwise successful compose", {
   assert.doesNotMatch(source, /Final visual QA rejected catastrophic render defects/);
   assert.doesNotMatch(source, /if \(finalVisualQa\.hard_failed\)[\s\S]{0,500}throw new Error/);
 });
+test("only a failed first frame or clearly contradicting footage is critical", () => {
+  const critical = (sceneIndex, overrides) => classifyRenderedIssue(sceneIndex, good(overrides), contract).hard.filter((x) => x.critical);
+  assert.equal(critical(0, { entity_match: 45, overall: 82 }).length, 1, "first frame failing its contract is critical");
+  assert.equal(critical(2, { semantic_match: 60, overall: 60 }).length, 0, "a weak later scene is hard telemetry, not critical");
+  assert.equal(critical(2, { semantic_match: 40, overall: 40 }).length, 1, "later footage contradicting the narration is critical");
+  assert.equal(critical(0, { readability: 40 }).length, 0, "layout problems are never re-picked");
+});
+
+// Run the built FINAL_QA_REPICK_V1 block with stubbed dependencies.
+function repickBlock() {
+  const source = fs.readFileSync(path.join(__dirname, "..", "compose.js"), "utf8");
+  const start = source.indexOf("    // FINAL_QA_REPICK_V1:");
+  const end = source.indexOf("    await fsp.copyFile(finalPath, outputFullPath);", start);
+  assert.ok(start >= 0 && end > start, "re-pick block sits before the final copy");
+  return new Function("finalVisualQa", "reqBody", "scenes", "resolveBroll", "runComposeJob", "newTmpDir", "jobId",
+    "return (async () => {" + source.slice(start, end) + "\nreturn null; })();");
+}
+
+test("a critical scene gets new footage and exactly one re-render", {
+  skip: builtArtifactSkipReason("compose.js", "FINAL_QA_REPICK_V1"),
+}, async () => {
+  const run = repickBlock();
+  const scenes = [{ scene_index: 0, video_url: "https://x/old.mp4", asset_original_url: "https://src/old", selected_query: "two people talking" }, { scene_index: 1, images: ["https://x/ok.jpg"] }];
+  const qa = { hard_issues: [{ scene_index: 0, critical: true }, { scene_index: 1, critical: false }] };
+  const calls = [];
+  const resolve = async (input) => { calls.push(input); return { ok: true, type: "video", url: "https://x/new.mp4", original_url: "https://src/new" }; };
+  let rerender = null;
+  const result = await run(qa, { data: scenes }, scenes, resolve, async (body) => { rerender = body; return { success: true }; }, () => "tmp", "job1");
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].exclude_urls, ["https://x/old.mp4", "https://src/old"]);
+  assert.equal(scenes[0].video_url, "https://x/new.mp4");
+  assert.equal(rerender._qaRepickAttempted, true);
+  assert.equal(result.qa_repick.scenes[0].replacement, "https://src/new");
+  // The re-render itself never re-picks again.
+  assert.equal(await run(qa, { _qaRepickAttempted: true }, scenes, resolve, async () => assert.fail("looped"), () => "tmp", "job1"), null);
+});
+
+test("no re-render when the resolver has no different real footage", {
+  skip: builtArtifactSkipReason("compose.js", "FINAL_QA_REPICK_V1"),
+}, async () => {
+  const run = repickBlock();
+  const scenes = [{ scene_index: 0, video_url: "https://x/old.mp4" }];
+  const qa = { hard_issues: [{ scene_index: 0, critical: true }] };
+  const never = async () => assert.fail("must not re-render");
+  for (const answer of [{ ok: false, reason: "no_candidates" }, { ok: true, type: "video", url: "https://x/old.mp4" }, { ok: true, type: "template", template_name: "kinetic_text" }]) {
+    assert.equal(await run(qa, {}, scenes, async () => answer, never, () => "tmp", "job1"), null);
+  }
+  assert.equal(await run(qa, {}, scenes, async () => { throw new Error("pexels down"); }, never, () => "tmp", "job1"), null);
+});

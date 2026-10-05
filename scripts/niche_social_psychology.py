@@ -207,6 +207,9 @@ def apply(workflow: dict) -> None:
         f"niche: '{NICHE_ID}', concept_archetype: $('Extract Generated Topic').first().json.archetype || null,",
         "published niche tag"))
 
+    p["jsCode"] = _sub(p["jsCode"], "'Send this to your fact friend — subscribe for the next one.'",
+                       "'Send this to someone who needs to see it — and follow for more.'", "default outro line")
+
     tts = nodes[TTS]["parameters"]
     tts["url"] = _sub(tts["url"], f"/text-to-speech/{LEGACY_VOICE_ID}/", f"/text-to-speech/{VOICE_ID}/", "narration voice")
 

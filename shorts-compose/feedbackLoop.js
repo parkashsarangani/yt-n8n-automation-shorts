@@ -79,6 +79,7 @@ function normalizeCreativeDna(entry = {}) {
     canonical_key: dna.canonical_key || entry.canonical_key || null,
     concept_archetype: dna.concept_archetype || null,
     hook_type: dna.hook_type || null,
+    predicted_virality: dna.predicted_virality && typeof dna.predicted_virality === "object" ? dna.predicted_virality : null,
     hook_candidates: Array.isArray(dna.hook_candidates)
       ? dna.hook_candidates.filter((h) => typeof h === "string" && h.trim())
       : null,
